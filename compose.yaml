@@ -1,6 +1,9 @@
 services:
   gosend:
-    build: .
+    build:
+      context: .
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     container_name: gosend
     restart: unless-stopped
     network_mode: host
