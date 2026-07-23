@@ -61,12 +61,15 @@ type activeSend struct {
 }
 
 type Sender struct {
-	directory string
-	store     store.Store
-	devices   *device.Registry
-	self      localsend.DeviceInfo
-	mu        sync.RWMutex
-	active    map[string]*activeSend
+	directory  string
+	store      store.Store
+	devices    *device.Registry
+	self       localsend.DeviceInfo
+	mu         sync.RWMutex
+	active     map[string]*activeSend
+	notifyMu   sync.Mutex
+	onChange   func()
+	lastNotify time.Time
 }
 
 func NewSender(
@@ -81,6 +84,26 @@ func NewSender(
 		devices:   devices,
 		self:      self,
 		active:    make(map[string]*activeSend),
+	}
+}
+
+func (sender *Sender) SetOnChange(onChange func()) {
+	sender.notifyMu.Lock()
+	sender.onChange = onChange
+	sender.notifyMu.Unlock()
+}
+
+func (sender *Sender) notifyChange(force bool) {
+	sender.notifyMu.Lock()
+	if !force && time.Since(sender.lastNotify) < 150*time.Millisecond {
+		sender.notifyMu.Unlock()
+		return
+	}
+	sender.lastNotify = time.Now()
+	onChange := sender.onChange
+	sender.notifyMu.Unlock()
+	if onChange != nil {
+		onChange()
 	}
 }
 
@@ -136,6 +159,7 @@ func (sender *Sender) Start(
 	sender.mu.Lock()
 	sender.active[sessionID] = active
 	sender.mu.Unlock()
+	sender.notifyChange(true)
 	selectedPIN := ""
 	if len(pin) != 0 {
 		selectedPIN = pin[0]
@@ -196,6 +220,7 @@ func (sender *Sender) run(
 		sender.mu.Lock()
 		delete(sender.active, sessionID)
 		sender.mu.Unlock()
+		sender.notifyChange(true)
 	}()
 	sender.setSessionStatus(active, domain.TransferActive)
 	_ = sender.store.UpdateTransferStatus(ctx, sessionID, domain.TransferActive, "", nil)
@@ -436,12 +461,14 @@ func (sender *Sender) finishRemainingFiles(
 	for _, found := range updates {
 		_ = sender.store.UpdateTransferFile(context.Background(), found.recordID, status, found.sent, message)
 	}
+	sender.notifyChange(true)
 }
 
 func (sender *Sender) setSessionStatus(active *activeSend, status domain.TransferStatus) {
 	active.mu.Lock()
 	active.progress.Status = status
 	active.mu.Unlock()
+	sender.notifyChange(true)
 }
 
 func (sender *Sender) setFile(active *activeSend, index int, status domain.FileStatus, sent int64, message string) {
@@ -450,6 +477,7 @@ func (sender *Sender) setFile(active *activeSend, index int, status domain.FileS
 	active.progress.Files[index].Sent = sent
 	active.progress.Files[index].Error = message
 	active.mu.Unlock()
+	sender.notifyChange(status != domain.FileActive)
 }
 
 func (sender *Sender) cancelRemote(ctx context.Context, client *http.Client, baseURL, sessionID string) error {

@@ -17,10 +17,11 @@ type Device struct {
 }
 
 type Registry struct {
-	mu      sync.RWMutex
-	devices map[string]Device
-	ttl     time.Duration
-	now     func() time.Time
+	mu       sync.RWMutex
+	devices  map[string]Device
+	ttl      time.Duration
+	now      func() time.Time
+	onChange func()
 }
 
 func NewRegistry(ttl time.Duration) *Registry {
@@ -39,14 +40,24 @@ func (registry *Registry) Upsert(info localsend.DeviceInfo, ip string) bool {
 		return false
 	}
 	registry.mu.Lock()
-	defer registry.mu.Unlock()
 	_, existed := registry.devices[info.Fingerprint]
 	registry.devices[info.Fingerprint] = Device{
 		Info:     info,
 		IP:       ip,
 		LastSeen: registry.now().UTC(),
 	}
+	onChange := registry.onChange
+	registry.mu.Unlock()
+	if onChange != nil {
+		onChange()
+	}
 	return !existed
+}
+
+func (registry *Registry) SetOnChange(onChange func()) {
+	registry.mu.Lock()
+	registry.onChange = onChange
+	registry.mu.Unlock()
 }
 
 func (registry *Registry) Get(fingerprint string) (Device, bool) {
@@ -75,7 +86,6 @@ func (registry *Registry) List() []Device {
 func (registry *Registry) RemoveExpired() []Device {
 	cutoff := registry.now().UTC().Add(-registry.ttl)
 	registry.mu.Lock()
-	defer registry.mu.Unlock()
 	var removed []Device
 	for fingerprint, found := range registry.devices {
 		if found.LastSeen.After(cutoff) {
@@ -83,6 +93,11 @@ func (registry *Registry) RemoveExpired() []Device {
 		}
 		removed = append(removed, found)
 		delete(registry.devices, fingerprint)
+	}
+	onChange := registry.onChange
+	registry.mu.Unlock()
+	if len(removed) != 0 && onChange != nil {
+		onChange()
 	}
 	return removed
 }

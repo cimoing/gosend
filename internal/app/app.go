@@ -196,6 +196,10 @@ func newHandler(
 	if err != nil {
 		return nil, fmt.Errorf("open embedded Web files: %w", err)
 	}
+	events := newEventHub()
+	nearby.SetOnChange(events.Notify)
+	receiver.SetOnChange(events.Notify)
+	sender.SetOnChange(events.Notify)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServer(http.FS(staticFiles)))
@@ -339,6 +343,7 @@ func newHandler(
 			http.Error(response, "trust device failed", http.StatusInternalServerError)
 			return
 		}
+		events.Notify()
 		response.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("DELETE /api/v1/trusted-devices/{fingerprint}", func(response http.ResponseWriter, request *http.Request) {
@@ -351,6 +356,7 @@ func newHandler(
 			http.Error(response, "delete trusted device failed", http.StatusInternalServerError)
 			return
 		}
+		events.Notify()
 		response.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/v1/transfers", func(response http.ResponseWriter, request *http.Request) {
@@ -383,22 +389,71 @@ func newHandler(
 		}
 		response.Header().Set("Content-Type", "text/event-stream")
 		response.Header().Set("Cache-Control", "no-cache")
+		response.Header().Set("Connection", "keep-alive")
 		response.Header().Set("X-Accel-Buffering", "no")
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			snapshot := map[string]any{
-				"devices": nearby.List(),
-				"pending": receiver.Pending(),
-				"sending": sender.Active(),
+		notifications, unsubscribe := events.Subscribe()
+		defer unsubscribe()
+		heartbeat := time.NewTicker(20 * time.Second)
+		defer heartbeat.Stop()
+		_, _ = fmt.Fprint(response, "retry: 3000\n\n")
+		sendSnapshot := func() bool {
+			trusted, err := database.ListTrustedDevices(request.Context())
+			if err != nil {
+				_, _ = fmt.Fprintf(response, "event: error\ndata: %q\n\n", "list trusted devices failed")
+				flusher.Flush()
+				return false
 			}
-			payload, _ := json.Marshal(snapshot)
-			_, _ = fmt.Fprintf(response, "event: snapshot\ndata: %s\n\n", payload)
+			transfers, err := database.ListTransfers(request.Context(), 200)
+			if err != nil {
+				_, _ = fmt.Fprintf(response, "event: error\ndata: %q\n\n", "list transfers failed")
+				flusher.Flush()
+				return false
+			}
+			snapshot := map[string]any{
+				"status": map[string]any{
+					"alias":                cfg.Alias,
+					"protocol":             "LocalSend",
+					"protocolVersion":      localsend.ProtocolVersion,
+					"specificationVersion": localsend.SpecificationVersion,
+					"fingerprint":          localIdentity.Fingerprint,
+					"database":             cfg.DatabaseDriver,
+					"receivePolicy":        cfg.ReceivePolicy,
+					"build":                buildinfo.Current(),
+					"ready":                databaseReady(request.Context(), database),
+					"nearbyDevices":        len(nearby.List()),
+				},
+				"devices":   nearby.List(),
+				"trusted":   trusted,
+				"pending":   receiver.Pending(),
+				"sending":   sender.Active(),
+				"transfers": transfers,
+			}
+			payload, err := json.Marshal(snapshot)
+			if err != nil {
+				return false
+			}
+			if _, err := fmt.Fprintf(response, "event: snapshot\ndata: %s\n\n", payload); err != nil {
+				return false
+			}
 			flusher.Flush()
+			return true
+		}
+		if !sendSnapshot() {
+			return
+		}
+		for {
 			select {
 			case <-request.Context().Done():
 				return
-			case <-ticker.C:
+			case <-notifications:
+				if !sendSnapshot() {
+					return
+				}
+			case <-heartbeat.C:
+				if _, err := fmt.Fprint(response, ": keep-alive\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
 			}
 		}
 	})

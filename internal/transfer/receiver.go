@@ -76,6 +76,7 @@ type Receiver struct {
 	mu       sync.RWMutex
 	pending  map[string]*pendingState
 	sessions map[string]*receiveSession
+	onChange func()
 }
 
 func NewReceiver(config ReceiverConfig, database store.Store) (*Receiver, error) {
@@ -106,6 +107,21 @@ func (receiver *Receiver) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/localsend/v2/prepare-upload", receiver.handlePrepare)
 	mux.HandleFunc("POST /api/localsend/v2/upload", receiver.handleUpload)
 	mux.HandleFunc("POST /api/localsend/v2/cancel", receiver.handleCancel)
+}
+
+func (receiver *Receiver) SetOnChange(onChange func()) {
+	receiver.mu.Lock()
+	receiver.onChange = onChange
+	receiver.mu.Unlock()
+}
+
+func (receiver *Receiver) notifyChange() {
+	receiver.mu.RLock()
+	onChange := receiver.onChange
+	receiver.mu.RUnlock()
+	if onChange != nil {
+		onChange()
+	}
 }
 
 func (receiver *Receiver) Pending() []PendingRequest {
@@ -225,10 +241,12 @@ func (receiver *Receiver) authorize(
 		receiver.mu.Lock()
 		receiver.pending[id] = state
 		receiver.mu.Unlock()
+		receiver.notifyChange()
 		defer func() {
 			receiver.mu.Lock()
 			delete(receiver.pending, id)
 			receiver.mu.Unlock()
+			receiver.notifyChange()
 		}()
 		timer := time.NewTimer(manualDecisionWait)
 		defer timer.Stop()
@@ -303,6 +321,7 @@ func (receiver *Receiver) createSession(
 	receiver.mu.Lock()
 	receiver.sessions[sessionID] = session
 	receiver.mu.Unlock()
+	receiver.notifyChange()
 	return localsend.PrepareUploadResponse{SessionID: sessionID, Files: tokens}, nil
 }
 
@@ -455,6 +474,7 @@ func (receiver *Receiver) finishFile(
 	receiver.mu.Lock()
 	delete(receiver.sessions, session.id)
 	receiver.mu.Unlock()
+	receiver.notifyChange()
 }
 
 func (receiver *Receiver) handleCancel(response http.ResponseWriter, request *http.Request) {
@@ -499,6 +519,7 @@ func (receiver *Receiver) handleCancel(response http.ResponseWriter, request *ht
 		"cancelled",
 		&completedAt,
 	)
+	receiver.notifyChange()
 	response.WriteHeader(http.StatusOK)
 }
 
