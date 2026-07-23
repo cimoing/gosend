@@ -3,9 +3,7 @@ package discovery
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -246,9 +244,11 @@ func (service *Service) registerPeer(parent context.Context, announced localsend
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	transport := peerTransport(protocol, announced.Fingerprint)
-	client := &http.Client{Transport: transport, Timeout: requestTimeout}
-	defer transport.CloseIdleConnections()
+	client, err := localsend.HTTPClient(protocol, announced.Fingerprint, requestTimeout)
+	if err != nil {
+		return err
+	}
+	defer client.CloseIdleConnections()
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -371,30 +371,6 @@ func multicastInterfaces() ([]net.Interface, error) {
 		return nil, errors.New("no active multicast-capable network interface")
 	}
 	return capable, nil
-}
-
-func peerTransport(protocol, fingerprint string) *http.Transport {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if protocol != "https" {
-		return transport
-	}
-	transport.TLSClientConfig = &tls.Config{
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true, // Verified against the LocalSend certificate fingerprint below.
-		VerifyConnection: func(state tls.ConnectionState) error {
-			if len(state.PeerCertificates) == 0 {
-				return errors.New("peer presented no certificate")
-			}
-			sum := sha256.Sum256(state.PeerCertificates[0].Raw)
-			actual := hex.EncodeToString(sum[:])
-			expected := strings.ToLower(strings.ReplaceAll(fingerprint, ":", ""))
-			if actual != expected {
-				return fmt.Errorf("certificate fingerprint mismatch")
-			}
-			return nil
-		},
-	}
-	return transport
 }
 
 func validPeer(info localsend.DeviceInfo) bool {

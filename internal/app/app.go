@@ -32,6 +32,7 @@ type App struct {
 	nearby    *device.Registry
 	discovery *discovery.Service
 	receiver  *transfer.Receiver
+	sender    *transfer.Sender
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, error) {
@@ -72,7 +73,8 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		Certificate:    localIdentity.Certificate,
 		RegisterRoutes: receiver.RegisterRoutes,
 	}, nearby, logger)
-	handler, err := newHandler(cfg, database, localIdentity, nearby, receiver)
+	sender := transfer.NewSender(cfg.SendDirectory, database, nearby, discoveryService.SelfInfo(false))
+	handler, err := newHandler(cfg, database, localIdentity, nearby, receiver, sender)
 	if err != nil {
 		_ = database.Close()
 		return nil, err
@@ -91,6 +93,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		nearby:    nearby,
 		discovery: discoveryService,
 		receiver:  receiver,
+		sender:    sender,
 		server: &http.Server{
 			Addr:              cfg.WebAddress,
 			Handler:           handler,
@@ -143,6 +146,7 @@ func (a *App) Run(ctx context.Context) error {
 		runErr = ctx.Err()
 	}
 	cancel()
+	a.sender.CancelAll()
 	shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	if err := a.server.Shutdown(shutdownContext); err != nil && runErr == nil {
@@ -171,6 +175,7 @@ func newHandler(
 	localIdentity identity.Identity,
 	nearby *device.Registry,
 	receiver *transfer.Receiver,
+	sender *transfer.Sender,
 ) (http.Handler, error) {
 	staticFiles, err := fs.Sub(gosendweb.Static, "static")
 	if err != nil {
@@ -231,6 +236,38 @@ func newHandler(
 		}
 		if err != nil {
 			http.Error(response, "request already decided", http.StatusConflict)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/v1/send", func(response http.ResponseWriter, request *http.Request) {
+		var input struct {
+			Fingerprint string   `json:"fingerprint"`
+			Files       []string `json:"files"`
+			PIN         string   `json:"pin"`
+		}
+		request.Body = http.MaxBytesReader(response, request.Body, 1<<20)
+		defer request.Body.Close()
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			http.Error(response, "invalid body", http.StatusBadRequest)
+			return
+		}
+		sessionID, err := sender.Start(context.Background(), input.Fingerprint, input.Files, input.PIN)
+		if err != nil {
+			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(response).Encode(map[string]string{"sessionId": sessionID})
+	})
+	mux.HandleFunc("GET /api/v1/send-progress", func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"sessions": sender.Active()})
+	})
+	mux.HandleFunc("POST /api/v1/send/{id}/cancel", func(response http.ResponseWriter, request *http.Request) {
+		if err := sender.Cancel(request.PathValue("id")); errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "session not found", http.StatusNotFound)
 			return
 		}
 		response.WriteHeader(http.StatusNoContent)

@@ -2,7 +2,7 @@
 
 GoSend 是一个用 Go 编写、面向局域网常驻节点的 LocalSend 兼容文件传输服务。目标运行环境包括树莓派、NAS 和普通 Linux/Windows 主机，并提供浏览器管理界面。
 
-当前仓库已经完成 M3 多文件接收：除设备发现与多数据库持久化外，支持 LocalSend 接收准备、逐文件上传、取消、手动审批、信任设备策略和安全落盘；主动发送尚未实现。
+当前仓库已经完成 M4 双向多文件传输：支持发现在线设备、从固定发送目录主动发送、受控并发、证书指纹固定、进度/取消，以及带审批和安全落盘的接收。
 
 ## 设计目标
 
@@ -104,6 +104,22 @@ GET /api/v1/devices
 GET  /api/v1/receive-requests
 POST /api/v1/receive-requests/{id}/accept
 POST /api/v1/receive-requests/{id}/reject
+```
+
+主动发送 API 接受在线设备指纹、固定发送目录下的相对文件名和可选 PIN：
+
+```text
+POST /api/v1/send
+GET  /api/v1/send-progress
+POST /api/v1/send/{sessionId}/cancel
+```
+
+```json
+{
+  "fingerprint": "device-certificate-fingerprint",
+  "files": ["photo.jpg", "documents/report.pdf"],
+  "pin": ""
+}
 ```
 
 ## 协议资料

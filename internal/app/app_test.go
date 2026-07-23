@@ -14,6 +14,7 @@ import (
 	"gosend/internal/config"
 	"gosend/internal/device"
 	"gosend/internal/identity"
+	"gosend/internal/localsend"
 	"gosend/internal/store"
 	"gosend/internal/transfer"
 )
@@ -69,12 +70,15 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReceiver() error = %v", err)
 	}
+	nearby := device.NewRegistry(0)
+	sender := transfer.NewSender(cfg.SendDirectory, database, nearby, identityToInfo("test-fingerprint"))
 	handler, err := newHandler(
 		cfg,
 		database,
 		identity.Identity{Fingerprint: "test-fingerprint"},
-		device.NewRegistry(0),
+		nearby,
 		receiver,
+		sender,
 	)
 	if err != nil {
 		t.Fatalf("newHandler() error = %v", err)
@@ -89,6 +93,7 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		{path: "/api/v1/status", want: `"alias":"Test GoSend"`},
 		{path: "/api/v1/devices", want: `"devices":[]`},
 		{path: "/api/v1/receive-requests", want: `"requests":[]`},
+		{path: "/api/v1/send-progress", want: `"sessions":[]`},
 		{path: "/", want: "GoSend"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
@@ -107,5 +112,15 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		if !strings.Contains(string(body), test.want) {
 			t.Errorf("%s body = %q, want substring %q", test.path, body, test.want)
 		}
+	}
+}
+
+func identityToInfo(fingerprint string) localsend.DeviceInfo {
+	return localsend.DeviceInfo{
+		Alias:       "Test GoSend",
+		Version:     localsend.ProtocolVersion,
+		Fingerprint: fingerprint,
+		Port:        53317,
+		Protocol:    "https",
 	}
 }
