@@ -11,7 +11,7 @@ func FuzzSafeFileName(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
-		_ = safeFileName(name)
+		_ = safeFilePath(name)
 	})
 }
 

@@ -22,7 +22,11 @@ import (
 func TestSenderTransfersMultipleFilesOverPinnedTLS(t *testing.T) {
 	sendDirectory := t.TempDir()
 	receiveDirectory := t.TempDir()
-	for name, content := range map[string]string{"one.txt": "one", "two.txt": "second"} {
+	if err := os.MkdirAll(filepath.Join(sendDirectory, "documents"), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	files := map[string]string{"documents/one.txt": "one", "two.txt": "second"}
+	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(sendDirectory, name), []byte(content), 0o600); err != nil {
 			t.Fatalf("WriteFile(%s) error = %v", name, err)
 		}
@@ -57,7 +61,7 @@ func TestSenderTransfersMultipleFilesOverPinnedTLS(t *testing.T) {
 		Port:        53317,
 		Protocol:    "https",
 	})
-	sessionID, err := sender.Start(context.Background(), fingerprint, []string{"one.txt", "two.txt"})
+	sessionID, err := sender.Start(context.Background(), fingerprint, []string{"documents/one.txt", "two.txt"})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -74,7 +78,7 @@ func TestSenderTransfersMultipleFilesOverPinnedTLS(t *testing.T) {
 	if err != nil || transfer.Session.Status != domain.TransferCompleted {
 		t.Fatalf("outgoing transfer = %+v, %v", transfer, err)
 	}
-	for name, want := range map[string]string{"one.txt": "one", "two.txt": "second"} {
+	for name, want := range files {
 		content, err := os.ReadFile(filepath.Join(receiveDirectory, name))
 		if err != nil || string(content) != want {
 			t.Fatalf("received %s = %q, %v", name, content, err)

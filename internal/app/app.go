@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -274,6 +275,7 @@ func newHandler(
 		var input struct {
 			Fingerprint string   `json:"fingerprint"`
 			Files       []string `json:"files"`
+			Directories []string `json:"directories"`
 			PIN         string   `json:"pin"`
 		}
 		request.Body = http.MaxBytesReader(response, request.Body, 1<<20)
@@ -282,7 +284,12 @@ func newHandler(
 			http.Error(response, "invalid body", http.StatusBadRequest)
 			return
 		}
-		sessionID, err := sender.Start(context.Background(), input.Fingerprint, input.Files, input.PIN)
+		selected, err := expandSendSelection(cfg.SendDirectory, input.Files, input.Directories)
+		if err != nil {
+			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		sessionID, err := sender.Start(context.Background(), input.Fingerprint, selected, input.PIN)
 		if err != nil {
 			http.Error(response, err.Error(), http.StatusBadRequest)
 			return
@@ -295,14 +302,14 @@ func newHandler(
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"sessions": sender.Active()})
 	})
-	mux.HandleFunc("GET /api/v1/files", func(response http.ResponseWriter, _ *http.Request) {
-		files, err := listSendFiles(cfg.SendDirectory)
+	mux.HandleFunc("GET /api/v1/files", func(response http.ResponseWriter, request *http.Request) {
+		directory, err := listSendDirectory(cfg.SendDirectory, request.URL.Query().Get("path"))
 		if err != nil {
-			http.Error(response, "list files failed", http.StatusInternalServerError)
+			http.Error(response, err.Error(), http.StatusBadRequest)
 			return
 		}
 		response.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(response).Encode(map[string]any{"files": files})
+		_ = json.NewEncoder(response).Encode(directory)
 	})
 	mux.HandleFunc("GET /api/v1/trusted-devices", func(response http.ResponseWriter, request *http.Request) {
 		devices, err := database.ListTrustedDevices(request.Context())
@@ -445,6 +452,187 @@ type sendFile struct {
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+}
+
+type sendEntry struct {
+	Path     string    `json:"path"`
+	Name     string    `json:"name"`
+	Type     string    `json:"type"`
+	Size     int64     `json:"size,omitempty"`
+	Modified time.Time `json:"modified"`
+}
+
+type sendDirectory struct {
+	Path    string      `json:"path"`
+	Parent  string      `json:"parent"`
+	Entries []sendEntry `json:"entries"`
+}
+
+func listSendDirectory(root, relative string) (sendDirectory, error) {
+	resolvedRoot, target, cleanRelative, err := resolveSendPath(root, relative)
+	if err != nil {
+		return sendDirectory{}, err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return sendDirectory{}, err
+	}
+	if !info.IsDir() {
+		return sendDirectory{}, errors.New("send path is not a directory")
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return sendDirectory{}, err
+	}
+	result := sendDirectory{
+		Path:    filepath.ToSlash(cleanRelative),
+		Entries: make([]sendEntry, 0, len(entries)),
+	}
+	if cleanRelative != "." {
+		parent := filepath.Dir(cleanRelative)
+		if parent == "." {
+			parent = ""
+		}
+		result.Parent = filepath.ToSlash(parent)
+	} else {
+		result.Path = ""
+	}
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		entryInfo, infoErr := entry.Info()
+		if infoErr != nil {
+			return sendDirectory{}, infoErr
+		}
+		if !entryInfo.IsDir() && !entryInfo.Mode().IsRegular() {
+			continue
+		}
+		entryPath, relErr := filepath.Rel(resolvedRoot, filepath.Join(target, entry.Name()))
+		if relErr != nil {
+			return sendDirectory{}, relErr
+		}
+		entryType := "file"
+		if entryInfo.IsDir() {
+			entryType = "directory"
+		}
+		result.Entries = append(result.Entries, sendEntry{
+			Path:     filepath.ToSlash(entryPath),
+			Name:     entry.Name(),
+			Type:     entryType,
+			Size:     entryInfo.Size(),
+			Modified: entryInfo.ModTime().UTC(),
+		})
+	}
+	sort.Slice(result.Entries, func(left, right int) bool {
+		if result.Entries[left].Type != result.Entries[right].Type {
+			return result.Entries[left].Type == "directory"
+		}
+		return strings.ToLower(result.Entries[left].Name) < strings.ToLower(result.Entries[right].Name)
+	})
+	return result, nil
+}
+
+func expandSendSelection(root string, files, directories []string) ([]string, error) {
+	resolvedRoot, _, _, err := resolveSendPath(root, "")
+	if err != nil {
+		return nil, err
+	}
+	selected := make(map[string]struct{}, len(files))
+	for _, name := range files {
+		_, path, relative, resolveErr := resolveSendPath(resolvedRoot, name)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		if !info.Mode().IsRegular() {
+			return nil, errors.New("selected file is not a regular file")
+		}
+		selected[filepath.ToSlash(relative)] = struct{}{}
+	}
+	for _, name := range directories {
+		_, directory, _, resolveErr := resolveSendPath(resolvedRoot, name)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		info, statErr := os.Stat(directory)
+		if statErr != nil {
+			return nil, statErr
+		}
+		if !info.IsDir() {
+			return nil, errors.New("selected path is not a directory")
+		}
+		walkErr := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+			relative, relErr := filepath.Rel(resolvedRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			selected[filepath.ToSlash(relative)] = struct{}{}
+			return nil
+		})
+		if walkErr != nil {
+			return nil, walkErr
+		}
+	}
+	result := make([]string, 0, len(selected))
+	for name := range selected {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	if len(result) == 0 {
+		return nil, errors.New("no files selected")
+	}
+	return result, nil
+}
+
+func resolveSendPath(root, relative string) (string, string, string, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", "", err
+	}
+	resolvedRoot, err = filepath.Abs(resolvedRoot)
+	if err != nil {
+		return "", "", "", err
+	}
+	if filepath.IsAbs(relative) {
+		return "", "", "", errors.New("invalid send path")
+	}
+	cleanRelative := filepath.Clean(filepath.FromSlash(relative))
+	if cleanRelative == "" {
+		cleanRelative = "."
+	}
+	candidate := filepath.Join(resolvedRoot, cleanRelative)
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", "", "", err
+	}
+	inside, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return "", "", "", errors.New("send path escapes send directory")
+	}
+	return resolvedRoot, resolved, inside, nil
 }
 
 func listSendFiles(root string) ([]sendFile, error) {

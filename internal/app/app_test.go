@@ -142,6 +142,42 @@ func TestListSendFiles(t *testing.T) {
 	}
 }
 
+func TestListSendDirectoryAndExpandSelection(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "documents", "reports")
+	if err := os.MkdirAll(nested, 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "root.txt"), []byte("root"), 0o600); err != nil {
+		t.Fatalf("WriteFile(root.txt) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "annual.txt"), []byte("annual"), 0o600); err != nil {
+		t.Fatalf("WriteFile(annual.txt) error = %v", err)
+	}
+
+	directory, err := listSendDirectory(root, "documents")
+	if err != nil {
+		t.Fatalf("listSendDirectory() error = %v", err)
+	}
+	if directory.Path != "documents" || directory.Parent != "" || len(directory.Entries) != 1 {
+		t.Fatalf("listSendDirectory() = %+v", directory)
+	}
+	if directory.Entries[0].Type != "directory" || directory.Entries[0].Path != "documents/reports" {
+		t.Fatalf("directory entry = %+v", directory.Entries[0])
+	}
+
+	selected, err := expandSendSelection(root, []string{"root.txt"}, []string{"documents"})
+	if err != nil {
+		t.Fatalf("expandSendSelection() error = %v", err)
+	}
+	if len(selected) != 2 || selected[0] != "documents/reports/annual.txt" || selected[1] != "root.txt" {
+		t.Fatalf("expandSendSelection() = %#v", selected)
+	}
+	if _, err := expandSendSelection(root, nil, []string{"../outside"}); err == nil {
+		t.Fatal("expandSendSelection() traversal error = nil")
+	}
+}
+
 func TestSecureHandlerAuthenticationAndOrigin(t *testing.T) {
 	handler := secureHandler(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)

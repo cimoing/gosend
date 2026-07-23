@@ -299,7 +299,7 @@ func (sender *Sender) prepareSources(names []string) ([]sendSource, string, erro
 			path:       path,
 			info: localsend.FileInfo{
 				ID:       protocolID,
-				FileName: info.Name(),
+				FileName: filepath.ToSlash(filepath.Clean(name)),
 				Size:     info.Size(),
 				FileType: contentType,
 				SHA256:   hash,

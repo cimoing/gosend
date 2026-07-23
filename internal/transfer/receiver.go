@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -502,17 +503,23 @@ func (receiver *Receiver) handleCancel(response http.ResponseWriter, request *ht
 }
 
 func (receiver *Receiver) availableTarget(name string) (string, error) {
-	if !safeFileName(name) {
+	if !safeFilePath(name) {
 		return "", errors.New("unsafe file name")
 	}
-	extension := filepath.Ext(name)
-	base := strings.TrimSuffix(name, extension)
+	relative := filepath.FromSlash(name)
+	directory := filepath.Join(receiver.config.Directory, filepath.Dir(relative))
+	if err := ensureDirectoryPath(receiver.config.Directory, directory); err != nil {
+		return "", err
+	}
+	fileName := filepath.Base(relative)
+	extension := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, extension)
 	for index := 0; index < 10000; index++ {
-		candidateName := name
+		candidateName := fileName
 		if index > 0 {
 			candidateName = base + " (" + strconv.Itoa(index) + ")" + extension
 		}
-		candidate := filepath.Join(receiver.config.Directory, candidateName)
+		candidate := filepath.Join(directory, candidateName)
 		info, err := os.Lstat(candidate)
 		if errors.Is(err, os.ErrNotExist) {
 			return candidate, nil
@@ -535,20 +542,53 @@ func validatePrepare(prepare localsend.PrepareUploadRequest) error {
 		return errors.New("invalid file count")
 	}
 	for protocolID, file := range prepare.Files {
-		if protocolID == "" || file.ID != protocolID || file.Size < 0 || !safeFileName(file.FileName) {
+		if protocolID == "" || file.ID != protocolID || file.Size < 0 || !safeFilePath(file.FileName) {
 			return errors.New("invalid file metadata")
 		}
 	}
 	return nil
 }
 
-func safeFileName(name string) bool {
-	return name != "" &&
-		name != "." &&
-		name != ".." &&
-		filepath.Base(name) == name &&
-		!strings.ContainsAny(name, `/\`) &&
-		!strings.ContainsRune(name, 0)
+func safeFilePath(name string) bool {
+	if name == "" || strings.ContainsRune(name, 0) || strings.ContainsRune(name, '\\') || strings.HasPrefix(name, "/") {
+		return false
+	}
+	cleaned := path.Clean(name)
+	return cleaned == name && cleaned != "." && cleaned != ".." && !strings.HasPrefix(cleaned, "../")
+}
+
+func ensureDirectoryPath(root, target string) error {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.New("receive directory escaped")
+	}
+	current := root
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		if component == "" || component == "." {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, statErr := os.Lstat(current)
+		switch {
+		case errors.Is(statErr, os.ErrNotExist):
+			if err := os.Mkdir(current, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
+				return err
+			}
+		case statErr != nil:
+			return statErr
+		case info.Mode()&os.ModeSymlink != 0 || !info.IsDir():
+			return errors.New("unsafe receive directory")
+		}
+	}
+	return nil
 }
 
 func requestIP(address string) (string, error) {
