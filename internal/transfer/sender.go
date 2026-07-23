@@ -35,6 +35,7 @@ const (
 type SendProgress struct {
 	SessionID string                `json:"sessionId"`
 	Status    domain.TransferStatus `json:"status"`
+	Target    localsend.DeviceInfo  `json:"target"`
 	Files     []SendFileProgress    `json:"files"`
 }
 
@@ -123,7 +124,11 @@ func (sender *Sender) Start(
 	}
 	now := time.Now().UTC()
 	files := make([]domain.TransferFile, 0, len(sources))
-	progress := SendProgress{SessionID: sessionID, Status: domain.TransferPending}
+	progress := SendProgress{
+		SessionID: sessionID,
+		Status:    domain.TransferPending,
+		Target:    found.Info,
+	}
 	for _, source := range sources {
 		files = append(files, domain.TransferFile{
 			ID:        source.recordID,

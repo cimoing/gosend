@@ -61,9 +61,24 @@ func TestSenderTransfersMultipleFilesOverPinnedTLS(t *testing.T) {
 		Port:        53317,
 		Protocol:    "https",
 	})
+	progressUpdates := make(chan SendProgress, 1)
+	sender.SetOnChange(func() {
+		active := sender.Active()
+		if len(active) == 0 {
+			return
+		}
+		select {
+		case progressUpdates <- active[0]:
+		default:
+		}
+	})
 	sessionID, err := sender.Start(context.Background(), fingerprint, []string{"documents/one.txt", "two.txt"})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
+	}
+	progress := <-progressUpdates
+	if progress.Target.Alias != "Receiver" || progress.Target.Fingerprint != fingerprint {
+		t.Fatalf("send progress target = %+v", progress.Target)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
