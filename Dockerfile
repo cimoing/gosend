@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.25-alpine AS build
 WORKDIR /src
-ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
 COPY go.mod go.sum ./
 RUN GOPROXY="${GOPROXY}" go mod download
 COPY . .

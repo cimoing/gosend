@@ -10,23 +10,23 @@ sudo chown -R 10001:10001 data
 docker compose up -d --build
 ```
 
-构建时默认使用 `https://proxy.golang.org,direct`。可通过 `GOPROXY` 修改 Go 模块代理，例如：
+构建时默认使用 `https://goproxy.cn,direct`。仍可通过 `GOPROXY` 修改 Go 模块代理，例如：
 
 ```bash
-GOPROXY=https://goproxy.cn,direct docker compose up -d --build
+GOPROXY=https://proxy.golang.org,direct docker compose up -d --build
 ```
 
 PowerShell：
 
 ```powershell
-$env:GOPROXY = "https://goproxy.cn,direct"
+$env:GOPROXY = "https://proxy.golang.org,direct"
 docker compose up -d --build
 ```
 
 直接构建镜像时也可传入构建参数：
 
 ```bash
-docker build --build-arg GOPROXY=https://goproxy.cn,direct -t gosend .
+docker build --build-arg GOPROXY=https://proxy.golang.org,direct -t gosend .
 ```
 
 Windows/macOS Docker Desktop 默认不能直接使用 Linux 主机网络时，使用桥接覆盖：
