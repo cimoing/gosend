@@ -1,0 +1,7 @@
+services:
+  gosend:
+    network_mode: bridge
+    ports:
+      - "8080:8080/tcp"
+      - "53317:53317/tcp"
+      - "53317:53317/udp"

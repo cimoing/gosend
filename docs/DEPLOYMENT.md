@@ -10,6 +10,14 @@ sudo chown -R 10001:10001 data
 docker compose up -d --build
 ```
 
+Windows/macOS Docker Desktop 默认不能直接使用 Linux 主机网络时，使用桥接覆盖：
+
+```powershell
+docker compose -f compose.yaml -f compose.desktop.yaml up -d --build
+```
+
+桥接模式会发布 Web 和 LocalSend TCP/UDP 端口，但 Docker Desktop 对局域网组播的转发能力取决于其网络配置；若无法自动发现设备，应在 Docker Desktop 中启用 host networking，或在 Linux/NAS 主机上使用默认 Compose 配置。
+
 开放 TCP/UDP `53317` 和 Web TCP `8080`。不要在访客网络开启 AP 隔离。绑定挂载目录必须允许容器 UID `10001` 写入。
 
 生产环境应设置 `GOSEND_WEB_AUTH_TOKEN`。如果 Web 界面只允许本机访问，可将 `GOSEND_WEB_ADDRESS` 改为 `127.0.0.1:8080` 并由带认证的反向代理发布。
