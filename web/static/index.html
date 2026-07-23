@@ -103,15 +103,17 @@
         </section>
 
         <section id="history" class="page">
-          <header class="page-title">
-            <div><span>ACTIVITY</span><h1>历史</h1><p>发送与接收记录会通过实时通道自动更新。</p></div>
+          <header class="history-title">
+            <button class="history-back" data-page="receive" aria-label="返回接收页">←</button>
+            <h1>历史</h1>
           </header>
-          <div class="history-summary">
-            <article><small>全部记录</small><strong id="history-total">0</strong></article>
-            <article><small>成功完成</small><strong id="history-completed">0</strong></article>
-            <article><small>进行中</small><strong id="history-active">0</strong></article>
+          <div class="history-content">
+            <div class="history-actions">
+              <button data-open-receive-directory><span>▰</span> 打开目录</button>
+              <button data-clear-history><span>▥</span> 删除历史</button>
+            </div>
+            <div id="transfer-list" class="history-list"></div>
           </div>
-          <div id="transfer-list" class="history-list"></div>
         </section>
 
         <section id="settings" class="page">
@@ -151,6 +153,14 @@
           <button id="select-current-directory" class="secondary">选择当前文件夹</button>
           <button class="primary" data-close-picker>完成</button>
         </footer>
+      </div>
+    </dialog>
+
+    <dialog id="history-info-dialog" class="info-dialog">
+      <div class="info-dialog-shell">
+        <header><h2 id="history-info-title">记录信息</h2><button class="icon-button" data-close-history-info aria-label="关闭">×</button></header>
+        <div id="history-info-content" class="history-info-content"></div>
+        <footer><button class="primary" data-close-history-info>完成</button></footer>
       </div>
     </dialog>
 

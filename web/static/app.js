@@ -11,6 +11,7 @@ const state = {
   pickerMode: "file",
   directory: { path: "", parent: "", entries: [] },
   connected: false,
+  historyMenu: "",
 };
 
 const $ = selector => document.querySelector(selector);
@@ -54,6 +55,7 @@ function showPage(name) {
   if (!page) return;
   $$(".page").forEach(element => element.classList.toggle("active", element === page));
   $$(".sidebar [data-page]").forEach(element => element.classList.toggle("active", element.dataset.page === name));
+  document.body.classList.toggle("history-mode", name === "history");
   history.replaceState(null, "", `#${name}`);
 }
 
@@ -127,17 +129,28 @@ function render() {
     </article>`;
   }).join("");
 
-  const completed = state.transfers.filter(transfer => transfer.Status === "completed").length;
-  const active = state.transfers.filter(transfer => transfer.Status === "active" || transfer.Status === "pending").length;
-  $("#history-total").textContent = state.transfers.length;
-  $("#history-completed").textContent = completed;
-  $("#history-active").textContent = active;
-  $("#transfer-list").innerHTML = state.transfers.length
-    ? state.transfers.map(transfer => `<article class="history-card">
-      <div class="file-avatar">${transfer.Direction === "incoming" ? "↓" : "↑"}</div>
-      <div><h3>${transfer.Direction === "incoming" ? "接收自" : "发送至"} ${esc(transfer.PeerAlias)}</h3><div class="meta">${new Date(transfer.CreatedAt).toLocaleString()}${transfer.Error ? ` · ${esc(transfer.Error)}` : ""}</div></div>
-      <span class="history-status ${esc(transfer.Status)}">${esc(statusName(transfer.Status))}</span>
-    </article>`).join("")
+  const historyFiles = state.transfers.flatMap(transfer =>
+    (transfer.Files || []).map(file => ({ session: transfer.Session, file })));
+  $("#transfer-list").innerHTML = historyFiles.length
+    ? historyFiles.map(({ session, file }) => {
+      const menuKey = `${session.ID}:${file.ID}`;
+      const direction = session.Direction === "incoming" ? "接收" : "发送";
+      const date = new Date(file.UpdatedAt || session.UpdatedAt || session.CreatedAt).toLocaleString();
+      return `<article class="history-file-row">
+        <div class="file-avatar">${file.MIMEType?.startsWith("image/") ? "▧" : "▤"}</div>
+        <div>
+          <h3>${esc(file.FileName)}<span class="history-direction">${direction}</span></h3>
+          <div class="meta">${date} · ${size(file.Size)} · ${esc(session.PeerAlias || "未知设备")} · ${esc(statusName(file.Status))}</div>
+        </div>
+        <button class="history-more ${state.historyMenu === menuKey ? "active" : ""}" data-history-more="${esc(menuKey)}" aria-label="文件操作">⋮</button>
+        ${state.historyMenu === menuKey ? `<div class="history-menu">
+          <button data-history-open="${esc(session.ID)}" data-history-file="${esc(file.ID)}">打开文件</button>
+          <button data-history-show="${esc(session.ID)}" data-history-file="${esc(file.ID)}">在服务器目录中显示</button>
+          <button data-history-info="${esc(session.ID)}" data-history-file="${esc(file.ID)}">信息</button>
+          <button class="danger" data-history-delete="${esc(session.ID)}" data-history-file="${esc(file.ID)}">从历史记录中删除</button>
+        </div>` : ""}
+      </article>`;
+    }).join("")
     : `<div class="empty-state"><strong>暂无传输记录</strong><p>完成的发送和接收会显示在这里。</p></div>`;
 
   $("#setting-alias").textContent = alias;
@@ -167,6 +180,38 @@ function renderSelection() {
     ? chips.map(item => `<span class="selected-chip"><b>${item.type === "directory" ? "▰" : "▤"}</b><span title="${esc(item.path)}">${esc(item.name)}</span><button data-remove-selection="${esc(item.type)}:${esc(item.path)}" aria-label="移除">×</button></span>`).join("")
     : `<span class="muted">尚未选择文件</span>`;
   $("#picker-count").textContent = chips.length;
+}
+
+function historyEntry(sessionID, fileID) {
+  const transfer = state.transfers.find(item => item.Session?.ID === sessionID);
+  if (!transfer) return null;
+  const file = (transfer.Files || []).find(item => item.ID === fileID);
+  return file ? { session: transfer.Session, file } : null;
+}
+
+function showHistoryInfo(title, rows) {
+  $("#history-info-title").textContent = title;
+  $("#history-info-content").innerHTML = rows.map(row =>
+    `<div class="history-info-row"><span>${esc(row.label)}</span>${row.code ? `<code>${esc(row.value)}</code>` : `<strong>${esc(row.value)}</strong>`}</div>`).join("");
+  const dialog = $("#history-info-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function showTransferInfo(entry) {
+  const root = entry.session.Direction === "incoming"
+    ? state.status?.receiveDirectory || "固定接收目录"
+    : "固定发送目录";
+  const separator = /[\\/]$/.test(root) ? "" : "/";
+  showHistoryInfo("文件信息", [
+    { label: "文件名", value: entry.file.FileName },
+    { label: "方向", value: entry.session.Direction === "incoming" ? "接收" : "发送" },
+    { label: "设备", value: entry.session.PeerAlias || "未知设备" },
+    { label: "大小", value: size(entry.file.Size) },
+    { label: "状态", value: statusName(entry.file.Status) },
+    { label: "时间", value: new Date(entry.file.UpdatedAt || entry.session.UpdatedAt).toLocaleString() },
+    { label: "服务器路径", value: `${root}${separator}${entry.file.FileName}`, code: true },
+    { label: "会话 ID", value: entry.session.ID, code: true },
+  ]);
 }
 
 async function openPicker(mode, path = "") {
@@ -255,6 +300,79 @@ document.addEventListener("click", async event => {
     return;
   }
   try {
+    const historyMore = event.target.closest("[data-history-more]");
+    if (historyMore) {
+      state.historyMenu = state.historyMenu === historyMore.dataset.historyMore ? "" : historyMore.dataset.historyMore;
+      render();
+      return;
+    }
+    const historyAction = event.target.closest("[data-history-open], [data-history-show], [data-history-info], [data-history-delete]");
+    if (historyAction) {
+      const sessionID = historyAction.dataset.historyOpen ||
+        historyAction.dataset.historyShow ||
+        historyAction.dataset.historyInfo ||
+        historyAction.dataset.historyDelete;
+      const fileID = historyAction.dataset.historyFile;
+      const entry = historyEntry(sessionID, fileID);
+      state.historyMenu = "";
+      if (!entry) {
+        render();
+        return toast("历史记录已更新");
+      }
+      if (historyAction.dataset.historyOpen) {
+        window.open(
+          `/api/v1/transfers/${encodeURIComponent(sessionID)}/files/${encodeURIComponent(fileID)}/content`,
+          "_blank",
+          "noopener",
+        );
+        render();
+        return;
+      }
+      if (historyAction.dataset.historyShow) {
+        const root = entry.session.Direction === "incoming"
+          ? state.status?.receiveDirectory || "固定接收目录"
+          : "固定发送目录";
+        showHistoryInfo("服务器文件位置", [
+          { label: "目录", value: root, code: true },
+          { label: "相对路径", value: entry.file.FileName, code: true },
+          { label: "说明", value: "Web 页面无法直接唤起服务器上的桌面文件管理器。" },
+        ]);
+        render();
+        return;
+      }
+      if (historyAction.dataset.historyInfo) {
+        showTransferInfo(entry);
+        render();
+        return;
+      }
+      if (historyAction.dataset.historyDelete) {
+        if (!window.confirm(`仅从历史记录中删除“${entry.file.FileName}”？实体文件不会被删除。`)) return;
+        await api(
+          `/api/v1/transfers/${encodeURIComponent(sessionID)}/files/${encodeURIComponent(fileID)}`,
+          { method: "DELETE" },
+        );
+        toast("历史记录已删除");
+        return;
+      }
+    }
+    if (event.target.closest("[data-open-receive-directory]")) {
+      showHistoryInfo("接收目录", [
+        { label: "服务器路径", value: state.status?.receiveDirectory || "固定接收目录", code: true },
+        { label: "说明", value: "这是 GoSend 服务器上的目录，请通过 NAS 或服务器文件管理工具打开。" },
+      ]);
+      return;
+    }
+    if (event.target.closest("[data-clear-history]")) {
+      if (!state.transfers.length) return toast("暂无可删除的历史记录");
+      if (!window.confirm("清空全部传输历史？实体文件不会被删除。")) return;
+      await api("/api/v1/transfers", { method: "DELETE" });
+      toast("传输历史已清空");
+      return;
+    }
+    if (event.target.closest("[data-close-history-info]")) {
+      $("#history-info-dialog").close();
+      return;
+    }
     const pickerButton = event.target.closest("[data-open-picker]");
     if (pickerButton) return await openPicker(pickerButton.dataset.openPicker);
     if (event.target.closest("[data-close-picker]")) return $("#file-picker").close();
@@ -317,6 +435,11 @@ document.addEventListener("click", async event => {
     if (cancel) {
       await api(`/api/v1/send/${encodeURIComponent(cancel.dataset.cancel)}/cancel`, { method: "POST" });
       toast("正在取消发送");
+      return;
+    }
+    if (state.historyMenu && !event.target.closest(".history-menu")) {
+      state.historyMenu = "";
+      render();
     }
   } catch (error) {
     toast(error.message);
@@ -349,6 +472,11 @@ $("#send-button").addEventListener("click", async () => {
 $("#file-picker").addEventListener("cancel", event => {
   event.preventDefault();
   $("#file-picker").close();
+});
+
+$("#history-info-dialog").addEventListener("cancel", event => {
+  event.preventDefault();
+  $("#history-info-dialog").close();
 });
 
 showPage(location.hash.slice(1) || "receive");
