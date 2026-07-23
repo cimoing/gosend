@@ -117,17 +117,7 @@ function render() {
   const target = state.devices.find(device => device.info.fingerprint === state.target);
   $("#target-label").textContent = target?.info.alias || "请选择设备";
   $("#send-button").disabled = !target || selectionCount() === 0;
-
-  $("#progress-list").innerHTML = state.sending.map(session => {
-    const total = session.files.reduce((sum, file) => sum + file.size, 0);
-    const sent = session.files.reduce((sum, file) => sum + file.sent, 0);
-    const percent = total ? Math.min(100, Math.round(sent / total * 100)) : 0;
-    return `<article class="progress-card">
-      <div class="progress-line"><strong>${statusName(session.status)} · ${session.files.length} 个文件</strong><span>${percent}%</span></div>
-      <div class="progress-bar"><i style="width:${percent}%"></i></div>
-      <div class="progress-line meta"><span>${size(sent)} / ${size(total)}</span><button class="text-button danger" data-cancel="${esc(session.sessionId)}">取消</button></div>
-    </article>`;
-  }).join("");
+  renderActiveSend(alias, fingerprint);
 
   const historyFiles = state.transfers.flatMap(transfer =>
     (transfer.Files || []).map(file => ({ session: transfer.Session, file })));
@@ -164,6 +154,38 @@ function render() {
       <button data-untrust="${esc(device.Fingerprint)}">移除</button>
     </div>`).join("")
     : `<div class="empty-state compact"><strong>暂无信任设备</strong><p>可在“发送”页面点击设备右侧的心形按钮添加。</p></div>`;
+}
+
+function renderActiveSend(alias, fingerprint) {
+  const session = state.sending[0];
+  document.body.classList.toggle("sending-mode", Boolean(session));
+  if (!session) return;
+
+  const files = session.files || [];
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  const sent = files.reduce((sum, file) => sum + file.sent, 0);
+  const percent = total ? Math.min(100, Math.round(sent / total * 100)) : 0;
+  const waiting = files.length > 0 && files.every(file => file.status === "pending");
+  const target = session.target || {};
+  let status = "正在准备发送……";
+  if (session.status === "active" && waiting) status = "等待响应中……";
+  else if (session.status === "active") status = `正在发送…… ${percent}%`;
+  else if (session.status === "failed") status = "发送失败";
+  else if (session.status === "cancelled") status = "正在取消……";
+  else if (session.status === "completed") status = "发送完成";
+
+  $("#flow-source-name").textContent = alias;
+  $("#flow-source-code").textContent = fingerprint ? `#${fingerprint.slice(0, 4).toUpperCase()}` : "#—";
+  $("#flow-source-icon").textContent = deviceGlyph("server");
+  $("#flow-target-name").textContent = target.alias || "目标设备";
+  $("#flow-target-code").textContent = target.fingerprint ? `#${target.fingerprint.slice(0, 4).toUpperCase()}` : "#—";
+  $("#flow-target-model").textContent = target.deviceModel || target.deviceType || "LocalSend";
+  $("#flow-target-icon").textContent = deviceGlyph(target.deviceType);
+  $("#flow-status-text").textContent = status;
+  $("#flow-file-summary").textContent = `${files.length} 个文件 · ${size(total)}${state.sending.length > 1 ? ` · 另有 ${state.sending.length - 1} 个任务` : ""}`;
+  $("#flow-progress").hidden = sent === 0;
+  $("#flow-progress i").style.width = `${percent}%`;
+  $("#flow-cancel").dataset.cancel = session.sessionId;
 }
 
 function selectionCount() {

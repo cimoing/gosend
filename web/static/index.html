@@ -99,7 +99,33 @@
             <input id="send-pin" inputmode="numeric" autocomplete="off" placeholder="PIN（可选）" aria-label="接收端 PIN">
             <button id="send-button" class="primary">开始发送</button>
           </div>
-          <div id="progress-list" class="progress-list"></div>
+        </section>
+
+        <section id="send-session-view" aria-live="polite">
+          <div class="send-flow">
+            <div class="flow-device">
+              <div id="flow-source-icon" class="flow-device-icon">▦</div>
+              <div>
+                <h2 id="flow-source-name">GoSend</h2>
+                <div><span id="flow-source-code">#0000</span><span>GoSend</span></div>
+              </div>
+            </div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-device">
+              <div id="flow-target-icon" class="flow-device-icon">◆</div>
+              <div>
+                <h2 id="flow-target-name">目标设备</h2>
+                <div><span id="flow-target-code">#0000</span><span id="flow-target-model">LocalSend</span></div>
+              </div>
+            </div>
+            <div class="flow-spacer"></div>
+            <div class="flow-status">
+              <strong id="flow-status-text">等待响应中……</strong>
+              <small id="flow-file-summary">正在准备文件</small>
+              <div id="flow-progress" class="flow-progress"><i></i></div>
+              <button id="flow-cancel" class="flow-cancel"><span>×</span> 取消</button>
+            </div>
+          </div>
         </section>
 
         <section id="history" class="page">
