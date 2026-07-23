@@ -15,6 +15,7 @@ import (
 	"gosend/internal/device"
 	"gosend/internal/identity"
 	"gosend/internal/store"
+	"gosend/internal/transfer"
 )
 
 func TestNewInitializesSQLiteAndIdentity(t *testing.T) {
@@ -28,6 +29,7 @@ func TestNewInitializesSQLiteAndIdentity(t *testing.T) {
 		ReceiveDirectory: filepath.Join(root, "receive"),
 		DatabaseDriver:   "sqlite",
 		DatabaseDSN:      filepath.Join(root, "gosend.db"),
+		ReceivePolicy:    "manual",
 	}
 	application, err := New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -60,11 +62,19 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	}
 	database := store.NewMemory()
 	t.Cleanup(func() { _ = database.Close() })
+	receiver, err := transfer.NewReceiver(transfer.ReceiverConfig{
+		Directory: cfg.ReceiveDirectory,
+		Policy:    "manual",
+	}, database)
+	if err != nil {
+		t.Fatalf("NewReceiver() error = %v", err)
+	}
 	handler, err := newHandler(
 		cfg,
 		database,
 		identity.Identity{Fingerprint: "test-fingerprint"},
 		device.NewRegistry(0),
+		receiver,
 	)
 	if err != nil {
 		t.Fatalf("newHandler() error = %v", err)
@@ -78,6 +88,7 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		{path: "/readyz", want: `"ready":true`},
 		{path: "/api/v1/status", want: `"alias":"Test GoSend"`},
 		{path: "/api/v1/devices", want: `"devices":[]`},
+		{path: "/api/v1/receive-requests", want: `"requests":[]`},
 		{path: "/", want: "GoSend"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)

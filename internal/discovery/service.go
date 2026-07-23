@@ -36,6 +36,7 @@ type Config struct {
 	Fingerprint      string
 	Certificate      tls.Certificate
 	AnnounceInterval time.Duration
+	RegisterRoutes   func(*http.ServeMux)
 }
 
 type Service struct {
@@ -99,6 +100,9 @@ func (service *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /api/localsend/v2/info", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, service.SelfInfo(false))
 	})
+	if service.config.RegisterRoutes != nil {
+		service.config.RegisterRoutes(mux)
+	}
 	return mux
 }
 

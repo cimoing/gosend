@@ -24,6 +24,7 @@ type Config struct {
 	ReceiveDirectory string
 	DatabaseDriver   string
 	DatabaseDSN      string
+	ReceivePolicy    string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -44,6 +45,7 @@ func Parse(args []string, lookupEnv LookupEnv) (Config, error) {
 	flags.StringVar(&cfg.ReceiveDirectory, "receive-dir", defaults.ReceiveDirectory, "directory for received files")
 	flags.StringVar(&cfg.DatabaseDriver, "database-driver", defaults.DatabaseDriver, "database driver: memory, sqlite, mysql, or postgres")
 	flags.StringVar(&cfg.DatabaseDSN, "database-dsn", defaults.DatabaseDSN, "database connection string; defaults to <data-dir>/gosend.db for SQLite")
+	flags.StringVar(&cfg.ReceivePolicy, "receive-policy", defaults.ReceivePolicy, "incoming transfer policy: manual, trusted, or auto")
 
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
@@ -84,6 +86,7 @@ func defaultsFromEnvironment(lookupEnv LookupEnv) (Config, error) {
 		ReceiveDirectory: envOr(lookupEnv, "GOSEND_RECEIVE_DIR", ""),
 		DatabaseDriver:   envOr(lookupEnv, "GOSEND_DATABASE_DRIVER", "sqlite"),
 		DatabaseDSN:      envOr(lookupEnv, "GOSEND_DATABASE_DSN", ""),
+		ReceivePolicy:    envOr(lookupEnv, "GOSEND_RECEIVE_POLICY", "manual"),
 	}, nil
 }
 
@@ -132,6 +135,12 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	}
 	if cfg.DatabaseDriver != "memory" && cfg.DatabaseDSN == "" {
 		return Config{}, fmt.Errorf("database DSN is required for %s", cfg.DatabaseDriver)
+	}
+	cfg.ReceivePolicy = strings.ToLower(strings.TrimSpace(cfg.ReceivePolicy))
+	switch cfg.ReceivePolicy {
+	case "manual", "trusted", "auto":
+	default:
+		return Config{}, errors.New("receive policy must be one of manual, trusted, or auto")
 	}
 
 	return cfg, nil

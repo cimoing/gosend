@@ -18,6 +18,7 @@ import (
 	"gosend/internal/identity"
 	"gosend/internal/localsend"
 	"gosend/internal/store"
+	"gosend/internal/transfer"
 	gosendweb "gosend/web"
 )
 
@@ -30,6 +31,7 @@ type App struct {
 	store     store.Store
 	nearby    *device.Registry
 	discovery *discovery.Service
+	receiver  *transfer.Receiver
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, error) {
@@ -54,14 +56,23 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		_ = database.Close()
 		return nil, err
 	}
+	receiver, err := transfer.NewReceiver(transfer.ReceiverConfig{
+		Directory: cfg.ReceiveDirectory,
+		Policy:    cfg.ReceivePolicy,
+	}, database)
+	if err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 	nearby := device.NewRegistry(0)
 	discoveryService := discovery.New(discovery.Config{
-		Alias:       cfg.Alias,
-		Port:        cfg.LocalSendPort,
-		Fingerprint: localIdentity.Fingerprint,
-		Certificate: localIdentity.Certificate,
+		Alias:          cfg.Alias,
+		Port:           cfg.LocalSendPort,
+		Fingerprint:    localIdentity.Fingerprint,
+		Certificate:    localIdentity.Certificate,
+		RegisterRoutes: receiver.RegisterRoutes,
 	}, nearby, logger)
-	handler, err := newHandler(cfg, database, localIdentity, nearby)
+	handler, err := newHandler(cfg, database, localIdentity, nearby, receiver)
 	if err != nil {
 		_ = database.Close()
 		return nil, err
@@ -79,6 +90,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		store:     database,
 		nearby:    nearby,
 		discovery: discoveryService,
+		receiver:  receiver,
 		server: &http.Server{
 			Addr:              cfg.WebAddress,
 			Handler:           handler,
@@ -158,6 +170,7 @@ func newHandler(
 	database store.Store,
 	localIdentity identity.Identity,
 	nearby *device.Registry,
+	receiver *transfer.Receiver,
 ) (http.Handler, error) {
 	staticFiles, err := fs.Sub(gosendweb.Static, "static")
 	if err != nil {
@@ -195,6 +208,32 @@ func newHandler(
 	mux.HandleFunc("GET /api/v1/devices", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"devices": nearby.List()})
+	})
+	mux.HandleFunc("GET /api/v1/receive-requests", func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"requests": receiver.Pending()})
+	})
+	mux.HandleFunc("POST /api/v1/receive-requests/{id}/{decision}", func(response http.ResponseWriter, request *http.Request) {
+		var accept bool
+		switch request.PathValue("decision") {
+		case "accept":
+			accept = true
+		case "reject":
+			accept = false
+		default:
+			http.Error(response, "invalid decision", http.StatusBadRequest)
+			return
+		}
+		err := receiver.Decide(request.PathValue("id"), accept)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "request not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(response, "request already decided", http.StatusConflict)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
 	})
 	return mux, nil
 }

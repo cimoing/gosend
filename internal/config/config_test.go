@@ -47,6 +47,7 @@ func TestParseReadsEnvironment(t *testing.T) {
 		"GOSEND_DATA_DIR":        t.TempDir(),
 		"GOSEND_DATABASE_DRIVER": "pgsql",
 		"GOSEND_DATABASE_DSN":    "postgres://gosend:secret@db/gosend",
+		"GOSEND_RECEIVE_POLICY":  "trusted",
 	}
 	lookup := func(name string) (string, bool) {
 		value, ok := values[name]
@@ -62,6 +63,9 @@ func TestParseReadsEnvironment(t *testing.T) {
 	}
 	if cfg.DatabaseDriver != "postgres" {
 		t.Fatalf("DatabaseDriver = %q, want postgres", cfg.DatabaseDriver)
+	}
+	if cfg.ReceivePolicy != "trusted" {
+		t.Fatalf("ReceivePolicy = %q, want trusted", cfg.ReceivePolicy)
 	}
 }
 

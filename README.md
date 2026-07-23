@@ -2,7 +2,7 @@
 
 GoSend 是一个用 Go 编写、面向局域网常驻节点的 LocalSend 兼容文件传输服务。目标运行环境包括树莓派、NAS 和普通 Linux/Windows 主机，并提供浏览器管理界面。
 
-当前仓库已经完成 M2 设备发现：具备 Web 服务、多数据库仓储、稳定 HTTPS 身份、LocalSend HTTPS 注册端点、UDP 多网卡组播发现和在线设备 API；文件传输尚未实现。
+当前仓库已经完成 M3 多文件接收：除设备发现与多数据库持久化外，支持 LocalSend 接收准备、逐文件上传、取消、手动审批、信任设备策略和安全落盘；主动发送尚未实现。
 
 ## 设计目标
 
@@ -40,6 +40,7 @@ data/
 | `--receive-dir` | `GOSEND_RECEIVE_DIR` | `<data-dir>/receive` |
 | `--database-driver` | `GOSEND_DATABASE_DRIVER` | `sqlite` |
 | `--database-dsn` | `GOSEND_DATABASE_DSN` | `<data-dir>/gosend.db` |
+| `--receive-policy` | `GOSEND_RECEIVE_POLICY` | `manual` |
 
 例如：
 
@@ -91,6 +92,18 @@ go build -ldflags "-X gosend/internal/buildinfo.Version=0.1.0 -X gosend/internal
 
 ```text
 GET /api/v1/devices
+```
+
+接收策略：
+
+- `manual`：Web API 中出现待审批请求，60 秒内接受或拒绝。
+- `trusted`：只自动接受信任设备。
+- `auto`：自动接受任何局域网设备，适合隔离且可信的网络。
+
+```text
+GET  /api/v1/receive-requests
+POST /api/v1/receive-requests/{id}/accept
+POST /api/v1/receive-requests/{id}/reject
 ```
 
 ## 协议资料
