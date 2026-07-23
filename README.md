@@ -2,7 +2,7 @@
 
 GoSend 是一个用 Go 编写、面向局域网常驻节点的 LocalSend 兼容文件传输服务。目标运行环境包括树莓派、NAS 和普通 Linux/Windows 主机，并提供浏览器管理界面。
 
-当前仓库处于项目初始化阶段：已经具备可运行的 Web 服务、嵌入式静态页面、运行目录配置、协议数据类型和基础测试；设备发现与文件传输尚未实现。
+当前仓库已经完成 M1 运行基础与持久化：具备可运行的 Web 服务、嵌入式静态页面、多数据库仓储、版本化迁移、稳定 HTTPS 身份、运行目录配置和基础测试；设备发现与文件传输尚未实现。
 
 ## 设计目标
 
@@ -38,6 +38,8 @@ data/
 | `--data-dir` | `GOSEND_DATA_DIR` | `./data` |
 | `--send-dir` | `GOSEND_SEND_DIR` | `<data-dir>/send` |
 | `--receive-dir` | `GOSEND_RECEIVE_DIR` | `<data-dir>/receive` |
+| `--database-driver` | `GOSEND_DATABASE_DRIVER` | `sqlite` |
+| `--database-dsn` | `GOSEND_DATABASE_DSN` | `<data-dir>/gosend.db` |
 
 例如：
 
@@ -45,13 +47,26 @@ data/
 go run ./cmd/gosend --alias "Home NAS" --send-dir D:\Share\outbox --receive-dir D:\Share\inbox
 ```
 
+支持的数据库：
+
+| 驱动 | `--database-driver` | DSN 示例 |
+| --- | --- | --- |
+| 内存 | `memory` | 不需要；进程退出后数据消失 |
+| SQLite | `sqlite` | `D:\Data\gosend.db` |
+| MySQL/MariaDB | `mysql` | `gosend:secret@tcp(db:3306)/gosend?charset=utf8mb4` |
+| PostgreSQL | `postgres` 或 `pgsql` | `postgres://gosend:secret@db:5432/gosend?sslmode=require` |
+
+外部数据库必须预先创建数据库和用户。GoSend 启动时自动应用版本化表结构迁移，详细说明见 [数据库设计](docs/DATABASES.md)。
+
 ## 仓库结构
 
 ```text
 cmd/gosend/          程序入口
 internal/app/        生命周期和 HTTP 服务装配
 internal/config/     配置加载与目录约束
+internal/domain/     设备及传输领域模型
 internal/localsend/  LocalSend v2.1 协议模型
+internal/store/      内存及 SQL 仓储和迁移
 web/                 嵌入 Go 二进制的 Web 静态资源
 docs/                架构说明与开发计划
 ```
@@ -64,6 +79,12 @@ docs/                架构说明与开发计划
 go fmt ./...
 go test ./...
 go vet ./...
+```
+
+`/healthz` 用于进程存活检查；`/readyz` 会验证数据库连接是否可用。构建版本可通过链接参数注入：
+
+```powershell
+go build -ldflags "-X gosend/internal/buildinfo.Version=0.1.0 -X gosend/internal/buildinfo.Commit=<commit> -X gosend/internal/buildinfo.Date=<date>" ./cmd/gosend
 ```
 
 ## 协议资料

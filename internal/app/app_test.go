@@ -1,15 +1,50 @@
 package app
 
 import (
+	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"gosend/internal/config"
+	"gosend/internal/identity"
+	"gosend/internal/store"
 )
+
+func TestNewInitializesSQLiteAndIdentity(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		Alias:            "Test GoSend",
+		WebAddress:       "127.0.0.1:0",
+		LocalSendPort:    53317,
+		DataDirectory:    root,
+		SendDirectory:    filepath.Join(root, "send"),
+		ReceiveDirectory: filepath.Join(root, "receive"),
+		DatabaseDriver:   "sqlite",
+		DatabaseDSN:      filepath.Join(root, "gosend.db"),
+	}
+	application, err := New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = application.store.Close() })
+
+	for _, path := range []string{
+		cfg.SendDirectory,
+		cfg.ReceiveDirectory,
+		cfg.DatabaseDSN,
+		filepath.Join(root, "identity.pem"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("Stat(%q) error = %v", path, err)
+		}
+	}
+}
 
 func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	root := t.TempDir()
@@ -20,8 +55,11 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		DataDirectory:    root,
 		SendDirectory:    filepath.Join(root, "send"),
 		ReceiveDirectory: filepath.Join(root, "receive"),
+		DatabaseDriver:   "memory",
 	}
-	handler, err := newHandler(cfg)
+	database := store.NewMemory()
+	t.Cleanup(func() { _ = database.Close() })
+	handler, err := newHandler(cfg, database, identity.Identity{Fingerprint: "test-fingerprint"})
 	if err != nil {
 		t.Fatalf("newHandler() error = %v", err)
 	}
@@ -31,6 +69,7 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		want string
 	}{
 		{path: "/healthz", want: `"status":"ok"`},
+		{path: "/readyz", want: `"ready":true`},
 		{path: "/api/v1/status", want: `"alias":"Test GoSend"`},
 		{path: "/", want: "GoSend"},
 	} {

@@ -24,7 +24,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	application, err := app.New(cfg, logger)
+	application, err := app.New(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("initialize application", "error", err)
 		os.Exit(1)
@@ -37,6 +37,7 @@ func main() {
 		"localsend_port", cfg.LocalSendPort,
 		"send_directory", cfg.SendDirectory,
 		"receive_directory", cfg.ReceiveDirectory,
+		"database_driver", cfg.DatabaseDriver,
 	)
 
 	if err := application.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

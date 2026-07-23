@@ -23,6 +23,9 @@ func TestParseUsesDataDirectoryForTransferDirectories(t *testing.T) {
 	if got, want := cfg.ReceiveDirectory, filepath.Join(cfg.DataDirectory, "receive"); got != want {
 		t.Fatalf("ReceiveDirectory = %q, want %q", got, want)
 	}
+	if got, want := cfg.DatabaseDSN, filepath.Join(cfg.DataDirectory, "gosend.db"); got != want {
+		t.Fatalf("DatabaseDSN = %q, want %q", got, want)
+	}
 }
 
 func TestParseRejectsSameTransferDirectory(t *testing.T) {
@@ -38,10 +41,12 @@ func TestParseRejectsSameTransferDirectory(t *testing.T) {
 
 func TestParseReadsEnvironment(t *testing.T) {
 	values := map[string]string{
-		"GOSEND_ALIAS":          "Raspberry Pi",
-		"GOSEND_WEB_ADDRESS":    "127.0.0.1:9090",
-		"GOSEND_LOCALSEND_PORT": "53318",
-		"GOSEND_DATA_DIR":       t.TempDir(),
+		"GOSEND_ALIAS":           "Raspberry Pi",
+		"GOSEND_WEB_ADDRESS":     "127.0.0.1:9090",
+		"GOSEND_LOCALSEND_PORT":  "53318",
+		"GOSEND_DATA_DIR":        t.TempDir(),
+		"GOSEND_DATABASE_DRIVER": "pgsql",
+		"GOSEND_DATABASE_DSN":    "postgres://gosend:secret@db/gosend",
 	}
 	lookup := func(name string) (string, bool) {
 		value, ok := values[name]
@@ -54,5 +59,18 @@ func TestParseReadsEnvironment(t *testing.T) {
 	}
 	if cfg.Alias != "Raspberry Pi" || cfg.WebAddress != "127.0.0.1:9090" || cfg.LocalSendPort != 53318 {
 		t.Fatalf("Parse() returned unexpected config: %+v", cfg)
+	}
+	if cfg.DatabaseDriver != "postgres" {
+		t.Fatalf("DatabaseDriver = %q, want postgres", cfg.DatabaseDriver)
+	}
+}
+
+func TestParseRequiresDSNForServerDatabase(t *testing.T) {
+	_, err := Parse(
+		[]string{"--database-driver", "mysql"},
+		func(string) (string, bool) { return "", false },
+	)
+	if err == nil {
+		t.Fatal("Parse() error = nil, want missing DSN error")
 	}
 }

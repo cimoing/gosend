@@ -22,6 +22,8 @@ type Config struct {
 	DataDirectory    string
 	SendDirectory    string
 	ReceiveDirectory string
+	DatabaseDriver   string
+	DatabaseDSN      string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -40,6 +42,8 @@ func Parse(args []string, lookupEnv LookupEnv) (Config, error) {
 	flags.StringVar(&cfg.DataDirectory, "data-dir", defaults.DataDirectory, "persistent application data directory")
 	flags.StringVar(&cfg.SendDirectory, "send-dir", defaults.SendDirectory, "directory containing files available to send")
 	flags.StringVar(&cfg.ReceiveDirectory, "receive-dir", defaults.ReceiveDirectory, "directory for received files")
+	flags.StringVar(&cfg.DatabaseDriver, "database-driver", defaults.DatabaseDriver, "database driver: memory, sqlite, mysql, or postgres")
+	flags.StringVar(&cfg.DatabaseDSN, "database-dsn", defaults.DatabaseDSN, "database connection string; defaults to <data-dir>/gosend.db for SQLite")
 
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
@@ -78,6 +82,8 @@ func defaultsFromEnvironment(lookupEnv LookupEnv) (Config, error) {
 		DataDirectory:    dataDirectory,
 		SendDirectory:    envOr(lookupEnv, "GOSEND_SEND_DIR", ""),
 		ReceiveDirectory: envOr(lookupEnv, "GOSEND_RECEIVE_DIR", ""),
+		DatabaseDriver:   envOr(lookupEnv, "GOSEND_DATABASE_DRIVER", "sqlite"),
+		DatabaseDSN:      envOr(lookupEnv, "GOSEND_DATABASE_DSN", ""),
 	}, nil
 }
 
@@ -93,8 +99,12 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	if cfg.LocalSendPort < 1 || cfg.LocalSendPort > 65535 {
 		return Config{}, errors.New("LocalSend port must be between 1 and 65535")
 	}
-
 	var err error
+	cfg.DatabaseDriver, err = normalizeDatabaseDriver(cfg.DatabaseDriver)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg.DataDirectory, err = absolutePath(cfg.DataDirectory)
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve data directory: %w", err)
@@ -116,8 +126,30 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	if samePath(cfg.SendDirectory, cfg.ReceiveDirectory) {
 		return Config{}, errors.New("send and receive directories must be different")
 	}
+	cfg.DatabaseDSN = strings.TrimSpace(cfg.DatabaseDSN)
+	if cfg.DatabaseDriver == "sqlite" && cfg.DatabaseDSN == "" {
+		cfg.DatabaseDSN = filepath.Join(cfg.DataDirectory, "gosend.db")
+	}
+	if cfg.DatabaseDriver != "memory" && cfg.DatabaseDSN == "" {
+		return Config{}, fmt.Errorf("database DSN is required for %s", cfg.DatabaseDriver)
+	}
 
 	return cfg, nil
+}
+
+func normalizeDatabaseDriver(driver string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "memory", "mem":
+		return "memory", nil
+	case "sqlite", "sqlite3":
+		return "sqlite", nil
+	case "mysql", "mariadb":
+		return "mysql", nil
+	case "postgres", "postgresql", "pgsql", "pg":
+		return "postgres", nil
+	default:
+		return "", errors.New("database driver must be one of memory, sqlite, mysql, or postgres")
+	}
 }
 
 func envOr(lookupEnv LookupEnv, name, fallback string) string {
