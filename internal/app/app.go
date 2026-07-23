@@ -9,12 +9,15 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"gosend/internal/buildinfo"
 	"gosend/internal/config"
 	"gosend/internal/device"
 	"gosend/internal/discovery"
+	"gosend/internal/domain"
 	"gosend/internal/identity"
 	"gosend/internal/localsend"
 	"gosend/internal/store"
@@ -265,6 +268,106 @@ func newHandler(
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"sessions": sender.Active()})
 	})
+	mux.HandleFunc("GET /api/v1/files", func(response http.ResponseWriter, _ *http.Request) {
+		files, err := listSendFiles(cfg.SendDirectory)
+		if err != nil {
+			http.Error(response, "list files failed", http.StatusInternalServerError)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"files": files})
+	})
+	mux.HandleFunc("GET /api/v1/trusted-devices", func(response http.ResponseWriter, request *http.Request) {
+		devices, err := database.ListTrustedDevices(request.Context())
+		if err != nil {
+			http.Error(response, "list trusted devices failed", http.StatusInternalServerError)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"devices": devices})
+	})
+	mux.HandleFunc("POST /api/v1/trusted-devices/{fingerprint}", func(response http.ResponseWriter, request *http.Request) {
+		found, ok := nearby.Get(request.PathValue("fingerprint"))
+		if !ok {
+			http.Error(response, "online device not found", http.StatusNotFound)
+			return
+		}
+		now := time.Now().UTC()
+		err := database.UpsertTrustedDevice(request.Context(), domain.TrustedDevice{
+			Fingerprint: found.Info.Fingerprint,
+			Alias:       found.Info.Alias,
+			DeviceModel: found.Info.DeviceModel,
+			DeviceType:  found.Info.DeviceType,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err != nil {
+			http.Error(response, "trust device failed", http.StatusInternalServerError)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /api/v1/trusted-devices/{fingerprint}", func(response http.ResponseWriter, request *http.Request) {
+		err := database.DeleteTrustedDevice(request.Context(), request.PathValue("fingerprint"))
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "trusted device not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(response, "delete trusted device failed", http.StatusInternalServerError)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v1/transfers", func(response http.ResponseWriter, request *http.Request) {
+		sessions, err := database.ListTransfers(request.Context(), 200)
+		if err != nil {
+			http.Error(response, "list transfers failed", http.StatusInternalServerError)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"transfers": sessions})
+	})
+	mux.HandleFunc("GET /api/v1/transfers/{id}", func(response http.ResponseWriter, request *http.Request) {
+		found, err := database.GetTransfer(request.Context(), request.PathValue("id"))
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "transfer not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(response, "get transfer failed", http.StatusInternalServerError)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(found)
+	})
+	mux.HandleFunc("GET /api/v1/events", func(response http.ResponseWriter, request *http.Request) {
+		flusher, ok := response.(http.Flusher)
+		if !ok {
+			http.Error(response, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.Header().Set("Cache-Control", "no-cache")
+		response.Header().Set("X-Accel-Buffering", "no")
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			snapshot := map[string]any{
+				"devices": nearby.List(),
+				"pending": receiver.Pending(),
+				"sending": sender.Active(),
+			}
+			payload, _ := json.Marshal(snapshot)
+			_, _ = fmt.Fprintf(response, "event: snapshot\ndata: %s\n\n", payload)
+			flusher.Flush()
+			select {
+			case <-request.Context().Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	})
 	mux.HandleFunc("POST /api/v1/send/{id}/cancel", func(response http.ResponseWriter, request *http.Request) {
 		if err := sender.Cancel(request.PathValue("id")); errors.Is(err, store.ErrNotFound) {
 			http.Error(response, "session not found", http.StatusNotFound)
@@ -273,6 +376,53 @@ func newHandler(
 		response.WriteHeader(http.StatusNoContent)
 	})
 	return mux, nil
+}
+
+type sendFile struct {
+	Path     string    `json:"path"`
+	Name     string    `json:"name"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
+}
+
+func listSendFiles(root string) ([]sendFile, error) {
+	var files []sendFile
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return errors.New("file escaped send directory")
+		}
+		files = append(files, sendFile{
+			Path:     filepath.ToSlash(relative),
+			Name:     entry.Name(),
+			Size:     info.Size(),
+			Modified: info.ModTime().UTC(),
+		})
+		return nil
+	})
+	return files, err
 }
 
 func databaseReady(ctx context.Context, database store.Store) bool {

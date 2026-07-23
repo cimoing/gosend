@@ -95,6 +95,7 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		{path: "/api/v1/receive-requests", want: `"requests":[]`},
 		{path: "/api/v1/send-progress", want: `"sessions":[]`},
 		{path: "/", want: "GoSend"},
+		{path: "/app.js", want: "const state="},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		response := httptest.NewRecorder()
@@ -112,6 +113,24 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		if !strings.Contains(string(body), test.want) {
 			t.Errorf("%s body = %q, want substring %q", test.path, body, test.want)
 		}
+	}
+}
+
+func TestListSendFiles(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "report.txt"), []byte("report"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	files, err := listSendFiles(root)
+	if err != nil {
+		t.Fatalf("listSendFiles() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "nested/report.txt" || files[0].Size != 6 {
+		t.Fatalf("listSendFiles() = %+v", files)
 	}
 }
 

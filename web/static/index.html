@@ -3,37 +3,50 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>GoSend</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        font-family: system-ui, sans-serif;
-      }
-      body {
-        display: grid;
-        min-height: 100vh;
-        margin: 0;
-        place-items: center;
-        background: #111827;
-        color: #f9fafb;
-      }
-      main {
-        width: min(36rem, calc(100% - 3rem));
-      }
-      p {
-        color: #cbd5e1;
-        line-height: 1.7;
-      }
-      code {
-        color: #67e8f9;
-      }
-    </style>
+    <meta name="theme-color" content="#0b1220">
+    <title>GoSend 控制台</title>
+    <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main>
-      <h1>GoSend</h1>
-      <p>项目骨架已启动。LocalSend 设备发现、信任管理和多文件传输将在后续里程碑接入。</p>
-      <p>健康检查：<code>/healthz</code></p>
-    </main>
+    <header>
+      <a class="brand" href="#overview"><span>G</span>GoSend</a>
+      <div class="node"><i id="health-dot"></i><strong id="node-alias">正在连接</strong><small>LocalSend 节点</small></div>
+    </header>
+    <div class="layout">
+      <nav aria-label="主导航">
+        <a href="#overview" data-page="overview" class="active">概览</a>
+        <a href="#devices" data-page="devices">附近设备 <b id="device-count">0</b></a>
+        <a href="#files" data-page="files">发送文件</a>
+        <a href="#transfers" data-page="transfers">传输记录</a>
+      </nav>
+      <main>
+        <section id="overview" class="page active">
+          <div class="title"><div><p>节点概览</p><h1>局域网文件流转，一眼可见</h1></div><button data-refresh>刷新</button></div>
+          <div class="metrics">
+            <article><small>在线设备</small><strong id="metric-devices">0</strong><span>最近 90 秒内发现</span></article>
+            <article><small>待确认接收</small><strong id="metric-pending">0</strong><span>手动策略请求</span></article>
+            <article><small>正在发送</small><strong id="metric-sending">0</strong><span>多文件会话</span></article>
+          </div>
+          <div class="panel"><div class="panel-head"><div><p>待处理</p><h2>接收请求</h2></div></div><div id="pending-list" class="empty">暂无待确认请求</div></div>
+        </section>
+        <section id="devices" class="page">
+          <div class="title"><div><p>LocalSend Discovery</p><h1>附近设备</h1></div><button data-refresh>重新发现</button></div>
+          <div id="device-list" class="cards"></div>
+          <div class="panel"><div class="panel-head"><div><p>持久身份</p><h2>信任设备</h2></div></div><div id="trusted-list"></div></div>
+        </section>
+        <section id="files" class="page">
+          <div class="title"><div><p>固定发送目录</p><h1>选择要发送的文件</h1></div><button data-refresh>扫描目录</button></div>
+          <div class="sendbar"><span>已选择 <strong id="selected-count">0</strong> 个文件</span><select id="target-device" aria-label="目标设备"><option value="">选择在线设备</option></select><input id="send-pin" inputmode="numeric" placeholder="PIN（可选）" aria-label="接收端 PIN"><button id="send-button" class="primary">开始发送</button></div>
+          <div class="panel"><div id="file-list" class="file-list"></div></div>
+          <div class="panel"><div class="panel-head"><div><p>实时状态</p><h2>发送进度</h2></div></div><div id="progress-list" class="empty">暂无活动发送</div></div>
+        </section>
+        <section id="transfers" class="page">
+          <div class="title"><div><p>持久记录</p><h1>发送与接收历史</h1></div><button data-refresh>刷新记录</button></div>
+          <div class="panel table-wrap"><table><thead><tr><th>方向</th><th>设备</th><th>状态</th><th>开始时间</th><th>错误</th></tr></thead><tbody id="transfer-list"></tbody></table></div>
+        </section>
+      </main>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
   </body>
 </html>
