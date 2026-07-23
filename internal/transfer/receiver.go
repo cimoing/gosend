@@ -83,11 +83,10 @@ func NewReceiver(config ReceiverConfig, database store.Store) (*Receiver, error)
 	if database == nil {
 		return nil, errors.New("receiver store is required")
 	}
-	config.Policy = strings.ToLower(strings.TrimSpace(config.Policy))
-	switch config.Policy {
-	case "manual", "trusted", "auto":
-	default:
-		return nil, errors.New("invalid receive policy")
+	var err error
+	config.Policy, err = normalizeReceivePolicy(config.Policy)
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Join(config.Directory, ".gosend-tmp"), 0o700); err != nil {
 		return nil, fmt.Errorf("create receive temporary directory: %w", err)
@@ -101,6 +100,23 @@ func NewReceiver(config ReceiverConfig, database store.Store) (*Receiver, error)
 		pending:  make(map[string]*pendingState),
 		sessions: make(map[string]*receiveSession),
 	}, nil
+}
+
+func (receiver *Receiver) Policy() string {
+	receiver.mu.RLock()
+	defer receiver.mu.RUnlock()
+	return receiver.config.Policy
+}
+
+func (receiver *Receiver) SetPolicy(policy string) error {
+	normalized, err := normalizeReceivePolicy(policy)
+	if err != nil {
+		return err
+	}
+	receiver.mu.Lock()
+	receiver.config.Policy = normalized
+	receiver.mu.Unlock()
+	return nil
 }
 
 func (receiver *Receiver) RegisterRoutes(mux *http.ServeMux) {
@@ -210,7 +226,7 @@ func (receiver *Receiver) authorize(
 	prepare localsend.PrepareUploadRequest,
 	ip string,
 ) (bool, error) {
-	switch receiver.config.Policy {
+	switch receiver.Policy() {
 	case "auto":
 		return true, nil
 	case "trusted":
@@ -261,6 +277,16 @@ func (receiver *Receiver) authorize(
 		}
 	default:
 		return false, errors.New("invalid receive policy")
+	}
+}
+
+func normalizeReceivePolicy(policy string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(policy))
+	switch normalized {
+	case "manual", "trusted", "auto":
+		return normalized, nil
+	default:
+		return "", errors.New("invalid receive policy")
 	}
 }
 

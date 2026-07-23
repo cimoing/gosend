@@ -51,6 +51,8 @@ go run ./cmd/gosend --alias "Home NAS" --send-dir D:\Share\outbox --receive-dir 
 
 管理面需要跨越不可信局域网时应设置 `GOSEND_WEB_AUTH_TOKEN`。用户名固定为 `gosend`，浏览器会显示标准认证对话框。`/healthz` 和 `/readyz` 保持免认证以供容器探针使用。
 
+设备名称、设备型号、设备类型和接收策略可在 Web“设置”页面修改。保存后写入当前数据库并立即生效；后续启动时，数据库中的值优先于对应的命令行或环境变量默认值。监听地址、端口、固定目录、数据库连接和设备指纹仍只能通过部署配置或身份文件管理。
+
 支持的数据库：
 
 | 驱动 | `--database-driver` | DSN 示例 |
@@ -98,9 +100,10 @@ go build -ldflags "-X gosend/internal/buildinfo.Version=0.1.0 -X gosend/internal
 ```text
 GET /api/v1/devices
 POST /api/v1/discovery/scan
+PUT /api/v1/settings/device
 ```
 
-GoSend 默认使用 UDP 组播发现设备，同时会在启动时和每 60 秒对本机局域网执行一次 LocalSend `/register` HTTP 兜底扫描。Web 中的“重新发现”按钮可立即触发扫描。
+GoSend 默认使用 UDP 组播发现设备，同时会在启动时和每 60 秒对本机局域网执行一次 LocalSend `/register` HTTP 兜底扫描。Web 中的“重新发现”按钮可立即触发扫描。设备指纹会统一转换为无冒号的小写格式，因此不同客户端使用全大写或全小写发送同一指纹时仍只显示一个设备。
 
 接收策略：
 

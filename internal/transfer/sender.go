@@ -94,6 +94,18 @@ func (sender *Sender) SetOnChange(onChange func()) {
 	sender.notifyMu.Unlock()
 }
 
+func (sender *Sender) SetSelf(info localsend.DeviceInfo) {
+	sender.mu.Lock()
+	sender.self = info
+	sender.mu.Unlock()
+}
+
+func (sender *Sender) selfInfo() localsend.DeviceInfo {
+	sender.mu.RLock()
+	defer sender.mu.RUnlock()
+	return sender.self
+}
+
 func (sender *Sender) notifyChange(force bool) {
 	sender.notifyMu.Lock()
 	if !force && time.Since(sender.lastNotify) < 150*time.Millisecond {
@@ -355,7 +367,7 @@ func (sender *Sender) prepareRemote(
 	for _, source := range sources {
 		files[source.protocolID] = source.info
 	}
-	body, _ := json.Marshal(localsend.PrepareUploadRequest{Info: sender.self, Files: files})
+	body, _ := json.Marshal(localsend.PrepareUploadRequest{Info: sender.selfInfo(), Files: files})
 	prepareURL := baseURL + "/api/localsend/v2/prepare-upload"
 	if pin != "" {
 		prepareURL += "?pin=" + url.QueryEscape(pin)

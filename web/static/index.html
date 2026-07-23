@@ -147,9 +147,42 @@
             <div><span>SETTINGS</span><h1>设置</h1></div>
           </header>
           <div class="settings-card">
-            <h2>节点</h2>
-            <div class="setting-row"><span>设备名称</span><strong id="setting-alias">—</strong></div>
-            <div class="setting-row"><span>接收策略</span><strong id="setting-policy">—</strong></div>
+            <div class="card-title"><div><h2>设备信息</h2><p>修改后会保存到数据库，并立即用于局域网发现和后续传输。</p></div></div>
+            <form id="device-settings-form">
+              <label class="setting-field">
+                <span>设备名称</span>
+                <input id="setting-alias-input" maxlength="80" required autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>设备型号</span>
+                <input id="setting-model-input" maxlength="80" required autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>设备类型</span>
+                <select id="setting-type-input">
+                  <option value="server">服务器</option>
+                  <option value="headless">无界面设备</option>
+                  <option value="desktop">桌面设备</option>
+                  <option value="mobile">移动设备</option>
+                  <option value="web">Web 设备</option>
+                </select>
+              </label>
+              <label class="setting-field">
+                <span>接收策略</span>
+                <select id="setting-policy-input">
+                  <option value="manual">手动确认</option>
+                  <option value="trusted">仅信任设备</option>
+                  <option value="auto">自动接收</option>
+                </select>
+              </label>
+              <div class="settings-submit">
+                <small>监听端口、固定目录和数据库连接仍由部署配置管理。</small>
+                <button class="primary" type="submit">保存设备设置</button>
+              </div>
+            </form>
+          </div>
+          <div class="settings-card">
+            <h2>运行信息</h2>
             <div class="setting-row"><span>数据库</span><strong id="setting-database">—</strong></div>
             <div class="setting-row stack"><span>设备指纹</span><code id="setting-fingerprint">—</code></div>
           </div>

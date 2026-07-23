@@ -29,6 +29,7 @@ func main() {
 		logger.Error("initialize application", "error", err)
 		os.Exit(1)
 	}
+	cfg = application.Config()
 
 	logger.Info(
 		"starting GoSend",

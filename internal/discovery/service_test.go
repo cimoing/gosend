@@ -93,6 +93,12 @@ func TestRegisterAndInfoHandlers(t *testing.T) {
 	if self.Alias != "GoSend NAS" || self.Fingerprint != "self-fingerprint" || self.Announce {
 		t.Fatalf("info = %+v", self)
 	}
+	service.UpdateInfo("Renamed NAS", "Raspberry Pi 5", "headless")
+	updated := service.SelfInfo(false)
+	if updated.Alias != "Renamed NAS" || updated.DeviceModel != "Raspberry Pi 5" ||
+		updated.DeviceType != "headless" {
+		t.Fatalf("updated info = %+v", updated)
+	}
 	devices := registry.List()
 	if len(devices) != 1 || devices[0].Info.Fingerprint != "peer-fingerprint" {
 		t.Fatalf("registered devices = %+v", devices)

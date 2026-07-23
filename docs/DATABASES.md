@@ -13,6 +13,8 @@ GoSend 使用统一仓储接口支持以下后端：
 
 配置中的 `mem`、`sqlite3`、`mariadb`、`pgsql`、`postgresql` 和 `pg` 会转换为对应的标准驱动名称。
 
+Web 设置页写入 `settings` 表中的 `device.alias`、`device.model`、`device.type` 和 `receive.policy`。内存驱动的修改仅在当前进程有效；SQLite、MySQL 和 PostgreSQL 会在重启后继续加载这些值。
+
 ## 配置示例
 
 内存：

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -41,6 +42,10 @@ type App struct {
 	sender    *transfer.Sender
 }
 
+func (a *App) Config() config.Config {
+	return a.config
+}
+
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -58,6 +63,14 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 	if err != nil {
 		return nil, err
 	}
+	settings, err := loadRuntimeSettings(ctx, database, cfg)
+	if err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+	currentSettings := settings.Current()
+	cfg.Alias = currentSettings.Alias
+	cfg.ReceivePolicy = currentSettings.ReceivePolicy
 	localIdentity, err := identity.LoadOrCreate(cfg.DataDirectory)
 	if err != nil {
 		_ = database.Close()
@@ -74,12 +87,19 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 	nearby := device.NewRegistry(0)
 	discoveryService := discovery.New(discovery.Config{
 		Alias:          cfg.Alias,
+		DeviceModel:    currentSettings.DeviceModel,
+		DeviceType:     currentSettings.DeviceType,
 		Port:           cfg.LocalSendPort,
 		Fingerprint:    localIdentity.Fingerprint,
 		Certificate:    localIdentity.Certificate,
 		RegisterRoutes: receiver.RegisterRoutes,
 	}, nearby, logger)
 	sender := transfer.NewSender(cfg.SendDirectory, database, nearby, discoveryService.SelfInfo(false))
+	applySettings := func(updated editableSettings) {
+		discoveryService.UpdateInfo(updated.Alias, updated.DeviceModel, updated.DeviceType)
+		sender.SetSelf(discoveryService.SelfInfo(false))
+		_ = receiver.SetPolicy(updated.ReceivePolicy)
+	}
 	handler, err := newHandler(
 		cfg,
 		database,
@@ -87,6 +107,8 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		nearby,
 		receiver,
 		sender,
+		settings,
+		applySettings,
 		discoveryService.TriggerScan,
 	)
 	if err != nil {
@@ -190,6 +212,8 @@ func newHandler(
 	nearby *device.Registry,
 	receiver *transfer.Receiver,
 	sender *transfer.Sender,
+	settings *runtimeSettings,
+	applySettings func(editableSettings),
 	triggerDiscovery func() bool,
 ) (http.Handler, error) {
 	staticFiles, err := fs.Sub(gosendweb.Static, "static")
@@ -200,6 +224,24 @@ func newHandler(
 	nearby.SetOnChange(events.Notify)
 	receiver.SetOnChange(events.Notify)
 	sender.SetOnChange(events.Notify)
+	currentStatus := func(ctx context.Context) map[string]any {
+		current := settings.Current()
+		return map[string]any{
+			"alias":                current.Alias,
+			"deviceModel":          current.DeviceModel,
+			"deviceType":           current.DeviceType,
+			"protocol":             "LocalSend",
+			"protocolVersion":      localsend.ProtocolVersion,
+			"specificationVersion": localsend.SpecificationVersion,
+			"fingerprint":          localIdentity.Fingerprint,
+			"database":             cfg.DatabaseDriver,
+			"receivePolicy":        current.ReceivePolicy,
+			"receiveDirectory":     cfg.ReceiveDirectory,
+			"build":                buildinfo.Current(),
+			"ready":                databaseReady(ctx, database),
+			"nearbyDevices":        len(nearby.List()),
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServer(http.FS(staticFiles)))
@@ -217,19 +259,37 @@ func newHandler(
 	})
 	mux.HandleFunc("GET /api/v1/status", func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(response).Encode(map[string]any{
-			"alias":                cfg.Alias,
-			"protocol":             "LocalSend",
-			"protocolVersion":      localsend.ProtocolVersion,
-			"specificationVersion": localsend.SpecificationVersion,
-			"fingerprint":          localIdentity.Fingerprint,
-			"database":             cfg.DatabaseDriver,
-			"receivePolicy":        cfg.ReceivePolicy,
-			"receiveDirectory":     cfg.ReceiveDirectory,
-			"build":                buildinfo.Current(),
-			"ready":                databaseReady(request.Context(), database),
-			"nearbyDevices":        len(nearby.List()),
-		})
+		_ = json.NewEncoder(response).Encode(currentStatus(request.Context()))
+	})
+	mux.HandleFunc("PUT /api/v1/settings/device", func(response http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(response, request.Body, 8<<10)
+		defer request.Body.Close()
+		var input editableSettings
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			http.Error(response, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			http.Error(response, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if _, err := normalizeEditableSettings(input); err != nil {
+			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		updated, err := settings.Update(request.Context(), database, input)
+		if err != nil {
+			http.Error(response, "save device settings failed", http.StatusInternalServerError)
+			return
+		}
+		if applySettings != nil {
+			applySettings(updated)
+		}
+		events.Notify()
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"settings": updated})
 	})
 	mux.HandleFunc("GET /api/v1/devices", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
@@ -531,19 +591,7 @@ func newHandler(
 				return false
 			}
 			snapshot := map[string]any{
-				"status": map[string]any{
-					"alias":                cfg.Alias,
-					"protocol":             "LocalSend",
-					"protocolVersion":      localsend.ProtocolVersion,
-					"specificationVersion": localsend.SpecificationVersion,
-					"fingerprint":          localIdentity.Fingerprint,
-					"database":             cfg.DatabaseDriver,
-					"receivePolicy":        cfg.ReceivePolicy,
-					"receiveDirectory":     cfg.ReceiveDirectory,
-					"build":                buildinfo.Current(),
-					"ready":                databaseReady(request.Context(), database),
-					"nearbyDevices":        len(nearby.List()),
-				},
+				"status":    currentStatus(request.Context()),
 				"devices":   nearby.List(),
 				"trusted":   trusted,
 				"pending":   receiver.Pending(),

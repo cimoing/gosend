@@ -12,6 +12,7 @@ const state = {
   directory: { path: "", parent: "", entries: [] },
   connected: false,
   historyMenu: "",
+  settingsDirty: false,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -143,8 +144,12 @@ function render() {
     }).join("")
     : `<div class="empty-state"><strong>暂无传输记录</strong><p>完成的发送和接收会显示在这里。</p></div>`;
 
-  $("#setting-alias").textContent = alias;
-  $("#setting-policy").textContent = policyName(state.status?.receivePolicy);
+  if (!state.settingsDirty) {
+    $("#setting-alias-input").value = alias;
+    $("#setting-model-input").value = state.status?.deviceModel || "GoSend";
+    $("#setting-type-input").value = state.status?.deviceType || "server";
+    $("#setting-policy-input").value = state.status?.receivePolicy || "manual";
+  }
   $("#setting-database").textContent = state.status?.database || "—";
   $("#setting-fingerprint").textContent = fingerprint || "—";
   $("#trusted-list").innerHTML = state.trusted.length
@@ -486,6 +491,30 @@ $("#send-button").addEventListener("click", async () => {
     $("#send-pin").value = "";
     render();
     toast("发送任务已创建");
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+$("#device-settings-form").addEventListener("input", () => {
+  state.settingsDirty = true;
+});
+
+$("#device-settings-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  try {
+    await api("/api/v1/settings/device", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        alias: $("#setting-alias-input").value,
+        deviceModel: $("#setting-model-input").value,
+        deviceType: $("#setting-type-input").value,
+        receivePolicy: $("#setting-policy-input").value,
+      }),
+    });
+    state.settingsDirty = false;
+    toast("设备设置已保存并生效");
   } catch (error) {
     toast(error.message);
   }

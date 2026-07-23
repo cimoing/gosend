@@ -17,7 +17,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; background: var(--bg); color: #e7f0ec; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
 
 .shell { min-height: 100vh; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
@@ -425,6 +425,39 @@ body.sending-mode #send-session-view { display: block; }
 
 .settings-card { max-width: 850px; margin: 0 auto 18px; padding: 22px 26px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; }
 .settings-card h2 { margin: 0 0 18px; }
+.settings-card .card-title p { margin: 0 0 18px; color: var(--muted); }
+#device-settings-form { display: grid; }
+.setting-field {
+  min-height: 70px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 360px);
+  align-items: center;
+  gap: 30px;
+  border-top: 1px solid var(--line);
+}
+.setting-field:first-child { border-top: 0; }
+.setting-field > span { color: #c4d2ce; }
+.setting-field input, .setting-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 13px;
+  color: #edf6f3;
+  background: #20342f;
+  border: 1px solid #35544d;
+  border-radius: 10px;
+  outline: none;
+}
+.setting-field input:focus, .setting-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #7de0d01c; }
+.settings-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.settings-submit small { color: var(--muted); line-height: 1.55; }
+.settings-submit button { flex: 0 0 auto; }
 .setting-row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 30px; border-top: 1px solid var(--line); }
 .setting-row:first-of-type { border-top: 0; }
 .setting-row span { color: #c4d2ce; }
@@ -528,6 +561,8 @@ dialog::backdrop { background: #020706cc; backdrop-filter: blur(5px); }
   .history-menu { right: 0; width: min(220px, calc(100vw - 52px)); }
   .history-info-row { grid-template-columns: 1fr; gap: 5px; }
   .settings-card { padding: 18px; }
+  .setting-field { grid-template-columns: 1fr; gap: 8px; padding: 13px 0; }
+  .settings-submit { align-items: stretch; flex-direction: column; }
   .dialog-foot { flex-wrap: wrap; }
   .dialog-foot > div { width: 100%; }
 }

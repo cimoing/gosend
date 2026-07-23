@@ -74,6 +74,10 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	}
 	nearby := device.NewRegistry(0)
 	sender := transfer.NewSender(cfg.SendDirectory, database, nearby, identityToInfo("test-fingerprint"))
+	settings, err := loadRuntimeSettings(context.Background(), database, cfg)
+	if err != nil {
+		t.Fatalf("loadRuntimeSettings() error = %v", err)
+	}
 	handler, err := newHandler(
 		cfg,
 		database,
@@ -81,6 +85,15 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		nearby,
 		receiver,
 		sender,
+		settings,
+		func(updated editableSettings) {
+			_ = receiver.SetPolicy(updated.ReceivePolicy)
+			self := identityToInfo("test-fingerprint")
+			self.Alias = updated.Alias
+			self.DeviceModel = updated.DeviceModel
+			self.DeviceType = updated.DeviceType
+			sender.SetSelf(self)
+		},
 		func() bool { return true },
 	)
 	if err != nil {
@@ -126,6 +139,52 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	handler.ServeHTTP(scanResponse, scanRequest)
 	if scanResponse.Code != http.StatusAccepted || !strings.Contains(scanResponse.Body.String(), `"started":true`) {
 		t.Fatalf("discovery scan response = %d %q", scanResponse.Code, scanResponse.Body.String())
+	}
+
+	settingsRequest := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/settings/device",
+		strings.NewReader(`{
+			"alias":"Home NAS",
+			"deviceModel":"Raspberry Pi 5",
+			"deviceType":"headless",
+			"receivePolicy":"trusted"
+		}`),
+	)
+	settingsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(settingsResponse, settingsRequest)
+	if settingsResponse.Code != http.StatusOK ||
+		!strings.Contains(settingsResponse.Body.String(), `"alias":"Home NAS"`) {
+		t.Fatalf("settings response = %d %q", settingsResponse.Code, settingsResponse.Body.String())
+	}
+	if receiver.Policy() != "trusted" {
+		t.Fatalf("receiver policy = %q, want trusted", receiver.Policy())
+	}
+	storedAlias, err := database.GetSetting(context.Background(), settingDeviceAlias)
+	if err != nil || storedAlias != "Home NAS" {
+		t.Fatalf("stored alias = %q, %v", storedAlias, err)
+	}
+	statusResponse := httptest.NewRecorder()
+	handler.ServeHTTP(statusResponse, httptest.NewRequest(http.MethodGet, "/api/v1/status", nil))
+	if !strings.Contains(statusResponse.Body.String(), `"deviceType":"headless"`) ||
+		!strings.Contains(statusResponse.Body.String(), `"receivePolicy":"trusted"`) {
+		t.Fatalf("updated status = %q", statusResponse.Body.String())
+	}
+	invalidSettingsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(
+		invalidSettingsResponse,
+		httptest.NewRequest(
+			http.MethodPut,
+			"/api/v1/settings/device",
+			strings.NewReader(`{"alias":"","deviceModel":"GoSend","deviceType":"server","receivePolicy":"manual"}`),
+		),
+	)
+	if invalidSettingsResponse.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"invalid settings response = %d %q",
+			invalidSettingsResponse.Code,
+			invalidSettingsResponse.Body.String(),
+		)
 	}
 
 	now := time.Now().UTC()

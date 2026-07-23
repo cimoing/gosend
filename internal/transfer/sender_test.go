@@ -61,6 +61,10 @@ func TestSenderTransfersMultipleFilesOverPinnedTLS(t *testing.T) {
 		Port:        53317,
 		Protocol:    "https",
 	})
+	updatedSelf := sender.selfInfo()
+	updatedSelf.Alias = "Renamed Sender"
+	updatedSelf.DeviceModel = "Raspberry Pi 5"
+	sender.SetSelf(updatedSelf)
 	progressUpdates := make(chan SendProgress, 1)
 	sender.SetOnChange(func() {
 		active := sender.Active()
@@ -98,6 +102,10 @@ func TestSenderTransfersMultipleFilesOverPinnedTLS(t *testing.T) {
 		if err != nil || string(content) != want {
 			t.Fatalf("received %s = %q, %v", name, content, err)
 		}
+	}
+	received, err := receiverStore.ListTransfers(context.Background(), 10)
+	if err != nil || len(received) != 1 || received[0].PeerAlias != "Renamed Sender" {
+		t.Fatalf("incoming transfer sender = %+v, %v", received, err)
 	}
 }
 

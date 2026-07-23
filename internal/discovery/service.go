@@ -38,6 +38,8 @@ const (
 
 type Config struct {
 	Alias            string
+	DeviceModel      string
+	DeviceType       string
 	Port             int
 	Fingerprint      string
 	Certificate      tls.Certificate
@@ -46,14 +48,16 @@ type Config struct {
 }
 
 type Service struct {
-	config   Config
-	registry *device.Registry
-	logger   *slog.Logger
-	server   *http.Server
-	packet   *ipv4.PacketConn
-	sendMu   sync.Mutex
-	scanMu   sync.Mutex
-	register chan struct{}
+	config      Config
+	infoMu      sync.RWMutex
+	registry    *device.Registry
+	logger      *slog.Logger
+	server      *http.Server
+	packet      *ipv4.PacketConn
+	sendMu      sync.Mutex
+	scanMu      sync.Mutex
+	register    chan struct{}
+	announceNow chan struct{}
 }
 
 func New(config Config, registry *device.Registry, logger *slog.Logger) *Service {
@@ -66,12 +70,19 @@ func New(config Config, registry *device.Registry, logger *slog.Logger) *Service
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if strings.TrimSpace(config.DeviceModel) == "" {
+		config.DeviceModel = "GoSend"
+	}
+	if strings.TrimSpace(config.DeviceType) == "" {
+		config.DeviceType = "server"
+	}
 	config.Fingerprint = localsend.NormalizeFingerprint(config.Fingerprint)
 	service := &Service{
-		config:   config,
-		registry: registry,
-		logger:   logger,
-		register: make(chan struct{}, 8),
+		config:      config,
+		registry:    registry,
+		logger:      logger,
+		register:    make(chan struct{}, 8),
+		announceNow: make(chan struct{}, 1),
 	}
 	service.server = &http.Server{
 		Addr:              ":" + strconv.Itoa(config.Port),
@@ -87,16 +98,30 @@ func New(config Config, registry *device.Registry, logger *slog.Logger) *Service
 }
 
 func (service *Service) SelfInfo(announce bool) localsend.DeviceInfo {
+	service.infoMu.RLock()
+	defer service.infoMu.RUnlock()
 	return localsend.DeviceInfo{
 		Alias:       service.config.Alias,
 		Version:     localsend.ProtocolVersion,
-		DeviceModel: "GoSend",
-		DeviceType:  "server",
+		DeviceModel: service.config.DeviceModel,
+		DeviceType:  service.config.DeviceType,
 		Fingerprint: service.config.Fingerprint,
 		Port:        service.config.Port,
 		Protocol:    "https",
 		Download:    false,
 		Announce:    announce,
+	}
+}
+
+func (service *Service) UpdateInfo(alias, deviceModel, deviceType string) {
+	service.infoMu.Lock()
+	service.config.Alias = alias
+	service.config.DeviceModel = deviceModel
+	service.config.DeviceType = deviceType
+	service.infoMu.Unlock()
+	select {
+	case service.announceNow <- struct{}{}:
+	default:
 	}
 }
 
@@ -309,6 +334,10 @@ func (service *Service) periodic(ctx context.Context) error {
 		case <-announceTicker.C:
 			if err := service.announce(true); err != nil {
 				service.logger.Debug("multicast announcement failed", "error", err)
+			}
+		case <-service.announceNow:
+			if err := service.announce(true); err != nil {
+				service.logger.Debug("updated device announcement failed", "error", err)
 			}
 		case <-cleanupTicker.C:
 			for _, expired := range service.registry.RemoveExpired() {

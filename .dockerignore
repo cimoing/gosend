@@ -1,5 +1,6 @@
 .git
 .github
+.cache
 bin
 data
 tmp
