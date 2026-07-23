@@ -9,11 +9,51 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"gosend/internal/device"
 	"gosend/internal/localsend"
 )
+
+func TestLocalSendTCPListenerAcceptsIPv4(t *testing.T) {
+	listener, err := listenLocalSendTCP(":0")
+	if err != nil {
+		t.Fatalf("listenLocalSendTCP() error = %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	accepted := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			acceptErr = connection.Close()
+		}
+		accepted <- acceptErr
+	}()
+
+	connection, err := net.DialTimeout(
+		"tcp4",
+		net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("IPv4 dial error = %v", err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatalf("close IPv4 connection: %v", err)
+	}
+	select {
+	case err := <-accepted:
+		if err != nil {
+			t.Fatalf("accept IPv4 connection: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out accepting IPv4 connection")
+	}
+}
 
 func TestRegisterAndInfoHandlers(t *testing.T) {
 	registry := device.NewRegistry(0)

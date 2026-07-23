@@ -112,7 +112,7 @@ func (service *Service) Handler() http.Handler {
 }
 
 func (service *Service) Run(ctx context.Context) error {
-	listener, err := net.Listen("tcp", service.server.Addr)
+	listener, err := listenLocalSendTCP(service.server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen for LocalSend HTTPS: %w", err)
 	}
@@ -152,6 +152,13 @@ func (service *Service) Run(ctx context.Context) error {
 		runErr = fmt.Errorf("shut down LocalSend HTTPS: %w", err)
 	}
 	return runErr
+}
+
+func listenLocalSendTCP(address string) (net.Listener, error) {
+	// LocalSend discovery uses an IPv4 multicast group, so peers connect back
+	// over IPv4. An unspecified "tcp" listener can become IPv6-only on hosts
+	// with net.ipv6.bindv6only enabled while still showing as :::port.
+	return net.Listen("tcp4", address)
 }
 
 func (service *Service) handleRegister(response http.ResponseWriter, request *http.Request) {
