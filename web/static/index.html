@@ -16,6 +16,7 @@
       <nav aria-label="主导航">
         <a href="#overview" data-page="overview" class="active">概览</a>
         <a href="#devices" data-page="devices">附近设备 <b id="device-count">0</b></a>
+        <a href="#receive" data-page="receive">接收文件 <b id="receive-count">0</b></a>
         <a href="#files" data-page="files">发送文件</a>
         <a href="#transfers" data-page="transfers">传输记录</a>
       </nav>
@@ -27,12 +28,20 @@
             <article><small>待确认接收</small><strong id="metric-pending">0</strong><span>手动策略请求</span></article>
             <article><small>正在发送</small><strong id="metric-sending">0</strong><span>多文件会话</span></article>
           </div>
-          <div class="panel"><div class="panel-head"><div><p>待处理</p><h2>接收请求</h2></div></div><div id="pending-list" class="empty">暂无待确认请求</div></div>
+          <div class="panel"><div class="panel-head"><div><p>待处理</p><h2>接收请求</h2></div><button data-page="receive">进入接收管理</button></div><div id="pending-summary" class="empty">暂无待确认请求</div></div>
         </section>
         <section id="devices" class="page">
-          <div class="title"><div><p>LocalSend Discovery</p><h1>附近设备</h1></div><button data-refresh>重新发现</button></div>
+          <div class="title"><div><p>LocalSend Discovery</p><h1>附近设备</h1></div><button data-discover>重新发现</button></div>
           <div id="device-list" class="cards"></div>
           <div class="panel"><div class="panel-head"><div><p>持久身份</p><h2>信任设备</h2></div></div><div id="trusted-list"></div></div>
+        </section>
+        <section id="receive" class="page">
+          <div class="title"><div><p>LocalSend Receive</p><h1>接收文件</h1></div><button data-refresh>刷新请求</button></div>
+          <div class="panel receive-guide">
+            <div><p class="meta">当前接收策略</p><strong id="receive-policy">正在读取</strong></div>
+            <p class="meta">手动策略下，请在发送端保持请求页面打开，并在 60 秒内于下方接受或拒绝。接受后的多个文件会写入固定接收目录。</p>
+          </div>
+          <div class="panel"><div class="panel-head"><div><p>待处理</p><h2>传入请求</h2></div></div><div id="pending-list" class="empty">暂无待确认请求</div></div>
         </section>
         <section id="files" class="page">
           <div class="title"><div><p>固定发送目录</p><h1>选择要发送的文件</h1></div><button data-refresh>扫描目录</button></div>
