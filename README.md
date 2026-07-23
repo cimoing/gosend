@@ -77,6 +77,8 @@ docs/                架构说明与开发计划
 
 完整里程碑、验收标准和关键风险见 [开发计划](docs/DEVELOPMENT_PLAN.md)。
 
+容器与 systemd 安装见 [部署文档](docs/DEPLOYMENT.md)。
+
 ## 开发命令
 
 ```powershell

@@ -1,0 +1,22 @@
+services:
+  gosend:
+    build: .
+    container_name: gosend
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      GOSEND_ALIAS: Home-NAS
+      GOSEND_WEB_ADDRESS: ":8080"
+      GOSEND_LOCALSEND_PORT: "53317"
+      GOSEND_DATA_DIR: /data
+      GOSEND_RECEIVE_POLICY: manual
+      # GOSEND_WEB_AUTH_TOKEN: change-me
+    volumes:
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

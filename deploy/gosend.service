@@ -1,0 +1,24 @@
+[Unit]
+Description=GoSend LocalSend-compatible file transfer node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gosend
+Group=gosend
+ExecStart=/usr/local/bin/gosend --data-dir /var/lib/gosend --send-dir /srv/gosend/send --receive-dir /srv/gosend/receive
+Restart=on-failure
+RestartSec=3
+StateDirectory=gosend
+RuntimeDirectory=gosend
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/gosend /srv/gosend/send /srv/gosend/receive
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
