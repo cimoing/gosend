@@ -13,6 +13,8 @@ import (
 
 	"gosend/internal/buildinfo"
 	"gosend/internal/config"
+	"gosend/internal/device"
+	"gosend/internal/discovery"
 	"gosend/internal/identity"
 	"gosend/internal/localsend"
 	"gosend/internal/store"
@@ -22,10 +24,12 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 type App struct {
-	config config.Config
-	logger *slog.Logger
-	server *http.Server
-	store  store.Store
+	config    config.Config
+	logger    *slog.Logger
+	server    *http.Server
+	store     store.Store
+	nearby    *device.Registry
+	discovery *discovery.Service
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, error) {
@@ -50,7 +54,14 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		_ = database.Close()
 		return nil, err
 	}
-	handler, err := newHandler(cfg, database, localIdentity)
+	nearby := device.NewRegistry(0)
+	discoveryService := discovery.New(discovery.Config{
+		Alias:       cfg.Alias,
+		Port:        cfg.LocalSendPort,
+		Fingerprint: localIdentity.Fingerprint,
+		Certificate: localIdentity.Certificate,
+	}, nearby, logger)
+	handler, err := newHandler(cfg, database, localIdentity, nearby)
 	if err != nil {
 		_ = database.Close()
 		return nil, err
@@ -63,9 +74,11 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 	)
 
 	return &App{
-		config: cfg,
-		logger: logger,
-		store:  database,
+		config:    cfg,
+		logger:    logger,
+		store:     database,
+		nearby:    nearby,
+		discovery: discoveryService,
 		server: &http.Server{
 			Addr:              cfg.WebAddress,
 			Handler:           handler,
@@ -81,30 +94,71 @@ func (a *App) Run(ctx context.Context) error {
 			a.logger.Error("close database", "error", err)
 		}
 	}()
-	errs := make(chan error, 1)
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		component string
+		err       error
+	}
+	results := make(chan result, 2)
 	go func() {
 		err := a.server.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errs <- err
+			results <- result{component: "Web server", err: err}
 			return
 		}
-		errs <- nil
+		results <- result{component: "Web server"}
+	}()
+	go func() {
+		err := a.discovery.Run(runContext)
+		if errors.Is(err, context.Canceled) {
+			err = nil
+		}
+		results <- result{component: "LocalSend discovery", err: err}
 	}()
 
+	var runErr error
+	completed := 0
 	select {
-	case err := <-errs:
-		return err
-	case <-ctx.Done():
-		shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		if err := a.server.Shutdown(shutdownContext); err != nil {
-			return fmt.Errorf("shut down Web server: %w", err)
+	case found := <-results:
+		completed++
+		if found.err != nil {
+			runErr = fmt.Errorf("%s stopped: %w", found.component, found.err)
+		} else if ctx.Err() == nil {
+			runErr = fmt.Errorf("%s stopped unexpectedly", found.component)
 		}
-		return ctx.Err()
+	case <-ctx.Done():
+		runErr = ctx.Err()
 	}
+	cancel()
+	shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
+	if err := a.server.Shutdown(shutdownContext); err != nil && runErr == nil {
+		runErr = fmt.Errorf("shut down Web server: %w", err)
+	}
+	for completed < 2 {
+		select {
+		case found := <-results:
+			completed++
+			if found.err != nil && runErr == nil {
+				runErr = fmt.Errorf("%s stopped: %w", found.component, found.err)
+			}
+		case <-shutdownContext.Done():
+			if runErr == nil {
+				runErr = errors.New("timed out waiting for services to stop")
+			}
+			completed = 2
+		}
+	}
+	return runErr
 }
 
-func newHandler(cfg config.Config, database store.Store, localIdentity identity.Identity) (http.Handler, error) {
+func newHandler(
+	cfg config.Config,
+	database store.Store,
+	localIdentity identity.Identity,
+	nearby *device.Registry,
+) (http.Handler, error) {
 	staticFiles, err := fs.Sub(gosendweb.Static, "static")
 	if err != nil {
 		return nil, fmt.Errorf("open embedded Web files: %w", err)
@@ -135,7 +189,12 @@ func newHandler(cfg config.Config, database store.Store, localIdentity identity.
 			"database":             cfg.DatabaseDriver,
 			"build":                buildinfo.Current(),
 			"ready":                databaseReady(request.Context(), database),
+			"nearbyDevices":        len(nearby.List()),
 		})
+	})
+	mux.HandleFunc("GET /api/v1/devices", func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(map[string]any{"devices": nearby.List()})
 	})
 	return mux, nil
 }

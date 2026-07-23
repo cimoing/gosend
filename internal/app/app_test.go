@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"gosend/internal/config"
+	"gosend/internal/device"
 	"gosend/internal/identity"
 	"gosend/internal/store"
 )
@@ -59,7 +60,12 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	}
 	database := store.NewMemory()
 	t.Cleanup(func() { _ = database.Close() })
-	handler, err := newHandler(cfg, database, identity.Identity{Fingerprint: "test-fingerprint"})
+	handler, err := newHandler(
+		cfg,
+		database,
+		identity.Identity{Fingerprint: "test-fingerprint"},
+		device.NewRegistry(0),
+	)
 	if err != nil {
 		t.Fatalf("newHandler() error = %v", err)
 	}
@@ -71,6 +77,7 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		{path: "/healthz", want: `"status":"ok"`},
 		{path: "/readyz", want: `"ready":true`},
 		{path: "/api/v1/status", want: `"alias":"Test GoSend"`},
+		{path: "/api/v1/devices", want: `"devices":[]`},
 		{path: "/", want: "GoSend"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)

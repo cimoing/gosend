@@ -2,7 +2,7 @@
 
 GoSend 是一个用 Go 编写、面向局域网常驻节点的 LocalSend 兼容文件传输服务。目标运行环境包括树莓派、NAS 和普通 Linux/Windows 主机，并提供浏览器管理界面。
 
-当前仓库已经完成 M1 运行基础与持久化：具备可运行的 Web 服务、嵌入式静态页面、多数据库仓储、版本化迁移、稳定 HTTPS 身份、运行目录配置和基础测试；设备发现与文件传输尚未实现。
+当前仓库已经完成 M2 设备发现：具备 Web 服务、多数据库仓储、稳定 HTTPS 身份、LocalSend HTTPS 注册端点、UDP 多网卡组播发现和在线设备 API；文件传输尚未实现。
 
 ## 设计目标
 
@@ -85,6 +85,12 @@ go vet ./...
 
 ```powershell
 go build -ldflags "-X gosend/internal/buildinfo.Version=0.1.0 -X gosend/internal/buildinfo.Commit=<commit> -X gosend/internal/buildinfo.Date=<date>" ./cmd/gosend
+```
+
+设备发现使用 LocalSend 默认 TCP/UDP 端口 `53317`。管理 API 可查看当前在线设备：
+
+```text
+GET /api/v1/devices
 ```
 
 ## 协议资料

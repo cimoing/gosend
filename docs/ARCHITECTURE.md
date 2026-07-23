@@ -19,8 +19,9 @@ Application services ───── Store interface
 
 计划中的代码边界：
 
-- `internal/localsend`：协议 DTO、UDP 发现、HTTP/HTTPS 客户端与服务端，不包含 UI 规则。
+- `internal/localsend`：LocalSend 协议常量与 DTO，不包含网络和 UI 规则。
 - `internal/device`：在线设备状态、超时淘汰和信任关系。
+- `internal/discovery`：多网卡 UDP 组播、LocalSend HTTPS 注册端点和指纹校验回连。
 - `internal/transfer`：发送/接收会话、多文件状态机、进度、取消与文件落盘。
 - `internal/store`：统一仓储接口、内存实现以及 SQLite/MySQL/PostgreSQL 适配器和迁移。
 - `internal/webapi`：仅供 GoSend Web 界面使用的 JSON API。
@@ -76,3 +77,12 @@ Application services ───── Store interface
 ## 节点身份
 
 首次启动在 `data-dir/identity.pem` 生成 ECDSA P-256 自签名证书，私钥文件权限为 `0600`。后续启动复用该证书，并以证书 DER 的 SHA-256 作为 LocalSend HTTPS 指纹。数据库切换不会改变节点身份。
+
+## 设备发现
+
+- 在所有启用且支持组播的非回环 IPv4 网卡上加入 `224.0.0.167:<localsend-port>`。
+- 启动时立即公告，此后默认每 30 秒公告一次；组播 TTL 为 1。
+- 收到 `announce=true` 时优先回连对端 `/api/localsend/v2/register`，失败则发送 `announce=false` 组播响应。
+- HTTPS 回连不使用系统 CA 验证自签名证书，而是严格比较发现消息声明的 SHA-256 指纹。
+- 在线设备以指纹去重，默认 90 秒未刷新即淘汰。
+- 注册请求和响应限制为 64 KiB，并验证协议版本、端口和协议类型。
