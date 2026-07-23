@@ -165,6 +165,43 @@ func runStoreContract(t *testing.T, database store.Store) {
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("ListTransfers() = %+v, %v", sessions, err)
 	}
+	if err := database.DeleteTransferFile(ctx, "file-1-"+suffix); err != nil {
+		t.Fatalf("DeleteTransferFile() error = %v", err)
+	}
+	transfer, err = database.GetTransfer(ctx, session.ID)
+	if err != nil || len(transfer.Files) != 1 || transfer.Files[0].ID != "file-2-"+suffix {
+		t.Fatalf("GetTransfer() after file delete = %+v, %v", transfer, err)
+	}
+	if err := database.DeleteTransferFile(ctx, "missing-file"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("DeleteTransferFile(missing) error = %v, want ErrNotFound", err)
+	}
+	if err := database.DeleteTransfer(ctx, session.ID); err != nil {
+		t.Fatalf("DeleteTransfer() error = %v", err)
+	}
+	if err := database.DeleteTransfer(ctx, session.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("DeleteTransfer(missing) error = %v, want ErrNotFound", err)
+	}
+
+	session.ID = "clear-session-" + suffix
+	files = []domain.TransferFile{{
+		ID:        "clear-file-" + suffix,
+		SessionID: session.ID,
+		FileName:  "clear.txt",
+		Size:      1,
+		Status:    domain.FilePending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}
+	if err := database.CreateTransfer(ctx, session, files); err != nil {
+		t.Fatalf("CreateTransfer(clear) error = %v", err)
+	}
+	if err := database.ClearTransfers(ctx); err != nil {
+		t.Fatalf("ClearTransfers() error = %v", err)
+	}
+	sessions, err = database.ListTransfers(ctx, 10)
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("ListTransfers() after clear = %+v, %v", sessions, err)
+	}
 
 	if err := database.DeleteTrustedDevice(ctx, device.Fingerprint); err != nil {
 		t.Fatalf("DeleteTrustedDevice() error = %v", err)

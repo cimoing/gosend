@@ -322,6 +322,106 @@ func (store *SQL) ListTransfers(ctx context.Context, limit int) ([]domain.Transf
 	return sessions, nil
 }
 
+func (store *SQL) DeleteTransfer(ctx context.Context, id string) error {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete transfer: %w", err)
+	}
+	defer func() { _ = transaction.Rollback() }()
+	if _, err := transaction.ExecContext(
+		ctx,
+		store.query("DELETE FROM transfer_files WHERE session_id = ?"),
+		id,
+	); err != nil {
+		return fmt.Errorf("delete transfer files: %w", err)
+	}
+	result, err := transaction.ExecContext(
+		ctx,
+		store.query("DELETE FROM transfer_sessions WHERE id = ?"),
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("delete transfer session: %w", err)
+	}
+	if err := requireAffected(result); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit delete transfer: %w", err)
+	}
+	return nil
+}
+
+func (store *SQL) DeleteTransferFile(ctx context.Context, id string) error {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete transfer file: %w", err)
+	}
+	defer func() { _ = transaction.Rollback() }()
+	var sessionID string
+	err = transaction.QueryRowContext(
+		ctx,
+		store.query("SELECT session_id FROM transfer_files WHERE id = ?"),
+		id,
+	).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("find transfer file: %w", err)
+	}
+	result, err := transaction.ExecContext(
+		ctx,
+		store.query("DELETE FROM transfer_files WHERE id = ?"),
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("delete transfer file: %w", err)
+	}
+	if err := requireAffected(result); err != nil {
+		return err
+	}
+	var remaining int
+	if err := transaction.QueryRowContext(
+		ctx,
+		store.query("SELECT COUNT(*) FROM transfer_files WHERE session_id = ?"),
+		sessionID,
+	).Scan(&remaining); err != nil {
+		return fmt.Errorf("count transfer files: %w", err)
+	}
+	if remaining == 0 {
+		if _, err := transaction.ExecContext(
+			ctx,
+			store.query("DELETE FROM transfer_sessions WHERE id = ?"),
+			sessionID,
+		); err != nil {
+			return fmt.Errorf("delete empty transfer session: %w", err)
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit delete transfer file: %w", err)
+	}
+	return nil
+}
+
+func (store *SQL) ClearTransfers(ctx context.Context) error {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin clear transfers: %w", err)
+	}
+	defer func() { _ = transaction.Rollback() }()
+	if _, err := transaction.ExecContext(ctx, "DELETE FROM transfer_files"); err != nil {
+		return fmt.Errorf("clear transfer files: %w", err)
+	}
+	if _, err := transaction.ExecContext(ctx, "DELETE FROM transfer_sessions"); err != nil {
+		return fmt.Errorf("clear transfer sessions: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit clear transfers: %w", err)
+	}
+	return nil
+}
+
 func (store *SQL) UpdateTransferStatus(
 	ctx context.Context,
 	id string,

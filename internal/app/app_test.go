@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gosend/internal/config"
 	"gosend/internal/device"
+	"gosend/internal/domain"
 	"gosend/internal/identity"
 	"gosend/internal/localsend"
 	"gosend/internal/store"
@@ -124,6 +126,46 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 	handler.ServeHTTP(scanResponse, scanRequest)
 	if scanResponse.Code != http.StatusAccepted || !strings.Contains(scanResponse.Body.String(), `"started":true`) {
 		t.Fatalf("discovery scan response = %d %q", scanResponse.Code, scanResponse.Body.String())
+	}
+
+	now := time.Now().UTC()
+	session := domain.TransferSession{
+		ID:        "history-session",
+		Direction: domain.TransferIncoming,
+		PeerAlias: "Phone",
+		Status:    domain.TransferCompleted,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	file := domain.TransferFile{
+		ID:        "history-file",
+		SessionID: session.ID,
+		FileName:  "photo.jpg",
+		Size:      12,
+		Status:    domain.FileCompleted,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := database.CreateTransfer(context.Background(), session, []domain.TransferFile{file}); err != nil {
+		t.Fatalf("CreateTransfer(history) error = %v", err)
+	}
+	historyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(historyResponse, httptest.NewRequest(http.MethodGet, "/api/v1/transfers", nil))
+	if historyResponse.Code != http.StatusOK ||
+		!strings.Contains(historyResponse.Body.String(), `"FileName":"photo.jpg"`) {
+		t.Fatalf("history response = %d %q", historyResponse.Code, historyResponse.Body.String())
+	}
+	deleteResponse := httptest.NewRecorder()
+	handler.ServeHTTP(
+		deleteResponse,
+		httptest.NewRequest(
+			http.MethodDelete,
+			"/api/v1/transfers/history-session/files/history-file",
+			nil,
+		),
+	)
+	if deleteResponse.Code != http.StatusNoContent {
+		t.Fatalf("delete history file response = %d %q", deleteResponse.Code, deleteResponse.Body.String())
 	}
 }
 

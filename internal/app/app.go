@@ -225,6 +225,7 @@ func newHandler(
 			"fingerprint":          localIdentity.Fingerprint,
 			"database":             cfg.DatabaseDriver,
 			"receivePolicy":        cfg.ReceivePolicy,
+			"receiveDirectory":     cfg.ReceiveDirectory,
 			"build":                buildinfo.Current(),
 			"ready":                databaseReady(request.Context(), database),
 			"nearbyDevices":        len(nearby.List()),
@@ -360,13 +361,13 @@ func newHandler(
 		response.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/v1/transfers", func(response http.ResponseWriter, request *http.Request) {
-		sessions, err := database.ListTransfers(request.Context(), 200)
+		transfers, err := listTransferDetails(request.Context(), database, 200)
 		if err != nil {
 			http.Error(response, "list transfers failed", http.StatusInternalServerError)
 			return
 		}
 		response.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(response).Encode(map[string]any{"transfers": sessions})
+		_ = json.NewEncoder(response).Encode(map[string]any{"transfers": transfers})
 	})
 	mux.HandleFunc("GET /api/v1/transfers/{id}", func(response http.ResponseWriter, request *http.Request) {
 		found, err := database.GetTransfer(request.Context(), request.PathValue("id"))
@@ -380,6 +381,126 @@ func newHandler(
 		}
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(found)
+	})
+	mux.HandleFunc("GET /api/v1/transfers/{id}/files/{fileID}/content", func(response http.ResponseWriter, request *http.Request) {
+		found, err := database.GetTransfer(request.Context(), request.PathValue("id"))
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "transfer not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(response, "get transfer failed", http.StatusInternalServerError)
+			return
+		}
+		var selected *domain.TransferFile
+		for index := range found.Files {
+			if found.Files[index].ID == request.PathValue("fileID") {
+				selected = &found.Files[index]
+				break
+			}
+		}
+		if selected == nil {
+			http.Error(response, "transfer file not found", http.StatusNotFound)
+			return
+		}
+		root := cfg.SendDirectory
+		if found.Session.Direction == domain.TransferIncoming {
+			root = cfg.ReceiveDirectory
+		}
+		_, path, _, err := resolveSendPath(root, selected.FileName)
+		if err != nil {
+			http.Error(response, "transfer file unavailable", http.StatusNotFound)
+			return
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			http.Error(response, "transfer file unavailable", http.StatusNotFound)
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			http.Error(response, "transfer file unavailable", http.StatusNotFound)
+			return
+		}
+		response.Header().Set(
+			"Content-Disposition",
+			"inline; filename*=UTF-8''"+url.PathEscape(filepath.Base(selected.FileName)),
+		)
+		http.ServeContent(response, request, filepath.Base(selected.FileName), info.ModTime(), file)
+	})
+	mux.HandleFunc("DELETE /api/v1/transfers/{id}", func(response http.ResponseWriter, request *http.Request) {
+		found, err := database.GetTransfer(request.Context(), request.PathValue("id"))
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "transfer not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(response, "get transfer failed", http.StatusInternalServerError)
+			return
+		}
+		if !transferTerminal(found.Session.Status) {
+			http.Error(response, "active transfer history cannot be deleted", http.StatusConflict)
+			return
+		}
+		if err := database.DeleteTransfer(request.Context(), found.Session.ID); err != nil {
+			http.Error(response, "delete transfer failed", http.StatusInternalServerError)
+			return
+		}
+		events.Notify()
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /api/v1/transfers/{id}/files/{fileID}", func(response http.ResponseWriter, request *http.Request) {
+		found, err := database.GetTransfer(request.Context(), request.PathValue("id"))
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "transfer not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(response, "get transfer failed", http.StatusInternalServerError)
+			return
+		}
+		if !transferTerminal(found.Session.Status) {
+			http.Error(response, "active transfer history cannot be deleted", http.StatusConflict)
+			return
+		}
+		fileID := request.PathValue("fileID")
+		fileFound := false
+		for _, file := range found.Files {
+			if file.ID == fileID {
+				fileFound = true
+				break
+			}
+		}
+		if !fileFound {
+			http.Error(response, "transfer file not found", http.StatusNotFound)
+			return
+		}
+		if err := database.DeleteTransferFile(request.Context(), fileID); err != nil {
+			http.Error(response, "delete transfer file failed", http.StatusInternalServerError)
+			return
+		}
+		events.Notify()
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /api/v1/transfers", func(response http.ResponseWriter, request *http.Request) {
+		sessions, err := database.ListTransfers(request.Context(), 1000)
+		if err != nil {
+			http.Error(response, "list transfers failed", http.StatusInternalServerError)
+			return
+		}
+		for _, session := range sessions {
+			if !transferTerminal(session.Status) {
+				http.Error(response, "active transfer history cannot be cleared", http.StatusConflict)
+				return
+			}
+		}
+		if err := database.ClearTransfers(request.Context()); err != nil {
+			http.Error(response, "clear transfer history failed", http.StatusInternalServerError)
+			return
+		}
+		events.Notify()
+		response.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/v1/events", func(response http.ResponseWriter, request *http.Request) {
 		flusher, ok := response.(http.Flusher)
@@ -403,7 +524,7 @@ func newHandler(
 				flusher.Flush()
 				return false
 			}
-			transfers, err := database.ListTransfers(request.Context(), 200)
+			transfers, err := listTransferDetails(request.Context(), database, 200)
 			if err != nil {
 				_, _ = fmt.Fprintf(response, "event: error\ndata: %q\n\n", "list transfers failed")
 				flusher.Flush()
@@ -418,6 +539,7 @@ func newHandler(
 					"fingerprint":          localIdentity.Fingerprint,
 					"database":             cfg.DatabaseDriver,
 					"receivePolicy":        cfg.ReceivePolicy,
+					"receiveDirectory":     cfg.ReceiveDirectory,
 					"build":                buildinfo.Current(),
 					"ready":                databaseReady(request.Context(), database),
 					"nearbyDevices":        len(nearby.List()),
@@ -734,4 +856,29 @@ func databaseReady(ctx context.Context, database store.Store) bool {
 	pingContext, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return database.Ping(pingContext) == nil
+}
+
+func listTransferDetails(ctx context.Context, database store.Store, limit int) ([]domain.Transfer, error) {
+	sessions, err := database.ListTransfers(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	transfers := make([]domain.Transfer, 0, len(sessions))
+	for _, session := range sessions {
+		found, err := database.GetTransfer(ctx, session.ID)
+		if err != nil {
+			return nil, err
+		}
+		transfers = append(transfers, found)
+	}
+	return transfers, nil
+}
+
+func transferTerminal(status domain.TransferStatus) bool {
+	switch status {
+	case domain.TransferCompleted, domain.TransferFailed, domain.TransferCancelled, domain.TransferRejected:
+		return true
+	default:
+		return false
+	}
 }

@@ -27,6 +27,9 @@ type Store interface {
 	CreateTransfer(context.Context, domain.TransferSession, []domain.TransferFile) error
 	GetTransfer(context.Context, string) (domain.Transfer, error)
 	ListTransfers(context.Context, int) ([]domain.TransferSession, error)
+	DeleteTransfer(context.Context, string) error
+	DeleteTransferFile(context.Context, string) error
+	ClearTransfers(context.Context) error
 	UpdateTransferStatus(context.Context, string, domain.TransferStatus, string, *time.Time) error
 	UpdateTransferFile(context.Context, string, domain.FileStatus, int64, string) error
 }

@@ -182,6 +182,43 @@ func (store *Memory) ListTransfers(_ context.Context, limit int) ([]domain.Trans
 	return sessions, nil
 }
 
+func (store *Memory) DeleteTransfer(_ context.Context, id string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if _, ok := store.transfers[id]; !ok {
+		return ErrNotFound
+	}
+	delete(store.transfers, id)
+	return nil
+}
+
+func (store *Memory) DeleteTransferFile(_ context.Context, id string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for sessionID, transfer := range store.transfers {
+		for index := range transfer.Files {
+			if transfer.Files[index].ID != id {
+				continue
+			}
+			transfer.Files = append(transfer.Files[:index], transfer.Files[index+1:]...)
+			if len(transfer.Files) == 0 {
+				delete(store.transfers, sessionID)
+			} else {
+				store.transfers[sessionID] = transfer
+			}
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (store *Memory) ClearTransfers(context.Context) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	clear(store.transfers)
+	return nil
+}
+
 func (store *Memory) UpdateTransferStatus(
 	_ context.Context,
 	id string,
