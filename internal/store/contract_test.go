@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,7 +90,7 @@ func runStoreContract(t *testing.T, database store.Store) {
 		t.Fatalf("GetSetting(missing) error = %v, want ErrNotFound", err)
 	}
 
-	device := domain.TrustedDevice{Fingerprint: "fingerprint-" + suffix, Alias: "Kitchen NAS"}
+	device := domain.TrustedDevice{Fingerprint: strings.ToUpper("fingerprint-" + suffix), Alias: "Kitchen NAS"}
 	if err := database.UpsertTrustedDevice(ctx, device); err != nil {
 		t.Fatalf("UpsertTrustedDevice() error = %v", err)
 	}
@@ -98,7 +99,8 @@ func runStoreContract(t *testing.T, database store.Store) {
 		t.Fatalf("UpsertTrustedDevice(update) error = %v", err)
 	}
 	devices, err := database.ListTrustedDevices(ctx)
-	if err != nil || len(devices) != 1 || devices[0].Alias != "Main NAS" {
+	if err != nil || len(devices) != 1 || devices[0].Alias != "Main NAS" ||
+		devices[0].Fingerprint != strings.ToLower(device.Fingerprint) {
 		t.Fatalf("ListTrustedDevices() = %+v, %v", devices, err)
 	}
 

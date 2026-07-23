@@ -66,6 +66,7 @@ func New(config Config, registry *device.Registry, logger *slog.Logger) *Service
 	if logger == nil {
 		logger = slog.Default()
 	}
+	config.Fingerprint = localsend.NormalizeFingerprint(config.Fingerprint)
 	service := &Service{
 		config:   config,
 		registry: registry,
@@ -174,6 +175,7 @@ func (service *Service) handleRegister(response http.ResponseWriter, request *ht
 		http.Error(response, "invalid body", http.StatusBadRequest)
 		return
 	}
+	info.Fingerprint = localsend.NormalizeFingerprint(info.Fingerprint)
 	if info.Fingerprint != service.config.Fingerprint {
 		if ip, err := remoteIP(request.RemoteAddr); err == nil {
 			service.registry.Upsert(info, ip)
@@ -207,6 +209,7 @@ func (service *Service) receive(ctx context.Context) error {
 		if err := json.Unmarshal(buffer[:count], &info); err != nil || !validPeer(info) {
 			continue
 		}
+		info.Fingerprint = localsend.NormalizeFingerprint(info.Fingerprint)
 		if info.Fingerprint == service.config.Fingerprint {
 			continue
 		}
@@ -239,6 +242,7 @@ func (service *Service) startRegister(ctx context.Context, info localsend.Device
 }
 
 func (service *Service) registerPeer(parent context.Context, announced localsend.DeviceInfo, ip string) error {
+	announced.Fingerprint = localsend.NormalizeFingerprint(announced.Fingerprint)
 	protocol := strings.ToLower(announced.Protocol)
 	if protocol != "http" && protocol != "https" {
 		return errors.New("unsupported peer protocol")
@@ -407,7 +411,7 @@ func (service *Service) probePeer(parent context.Context, ip string) bool {
 		if err != nil {
 			continue
 		}
-		if info.Fingerprint == service.config.Fingerprint {
+		if localsend.NormalizeFingerprint(info.Fingerprint) == service.config.Fingerprint {
 			return false
 		}
 		return service.registry.Upsert(info, ip)

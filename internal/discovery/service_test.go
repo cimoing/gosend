@@ -66,7 +66,7 @@ func TestRegisterAndInfoHandlers(t *testing.T) {
 		Alias:       "Phone",
 		Version:     "2.0",
 		DeviceType:  "mobile",
-		Fingerprint: "peer-fingerprint",
+		Fingerprint: "PEER-FINGERPRINT",
 		Port:        53317,
 		Protocol:    "https",
 	}
@@ -92,6 +92,10 @@ func TestRegisterAndInfoHandlers(t *testing.T) {
 	}
 	if self.Alias != "GoSend NAS" || self.Fingerprint != "self-fingerprint" || self.Announce {
 		t.Fatalf("info = %+v", self)
+	}
+	devices := registry.List()
+	if len(devices) != 1 || devices[0].Info.Fingerprint != "peer-fingerprint" {
+		t.Fatalf("registered devices = %+v", devices)
 	}
 }
 

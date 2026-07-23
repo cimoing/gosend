@@ -36,6 +36,7 @@ func NewRegistry(ttl time.Duration) *Registry {
 }
 
 func (registry *Registry) Upsert(info localsend.DeviceInfo, ip string) bool {
+	info.Fingerprint = localsend.NormalizeFingerprint(info.Fingerprint)
 	if info.Fingerprint == "" || info.Alias == "" || ip == "" {
 		return false
 	}
@@ -63,7 +64,7 @@ func (registry *Registry) SetOnChange(onChange func()) {
 func (registry *Registry) Get(fingerprint string) (Device, bool) {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
-	found, ok := registry.devices[fingerprint]
+	found, ok := registry.devices[localsend.NormalizeFingerprint(fingerprint)]
 	return found, ok
 }
 

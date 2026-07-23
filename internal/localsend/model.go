@@ -1,6 +1,8 @@
 // Package localsend contains protocol-facing types for LocalSend Protocol v2.1.
 package localsend
 
+import "strings"
+
 const (
 	SpecificationVersion = "2.1"
 	ProtocolVersion      = "2.0"
@@ -44,4 +46,11 @@ type PrepareUploadRequest struct {
 type PrepareUploadResponse struct {
 	SessionID string            `json:"sessionId"`
 	Files     map[string]string `json:"files"`
+}
+
+// NormalizeFingerprint returns the canonical representation used for device
+// identity comparisons and storage. LocalSend peers may advertise the same
+// hexadecimal certificate fingerprint with different casing or separators.
+func NormalizeFingerprint(value string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), ":", ""))
 }

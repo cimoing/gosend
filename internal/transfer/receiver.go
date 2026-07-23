@@ -165,6 +165,7 @@ func (receiver *Receiver) handlePrepare(response http.ResponseWriter, request *h
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
+	prepare.Info.Fingerprint = localsend.NormalizeFingerprint(prepare.Info.Fingerprint)
 	totalSize := int64(0)
 	for _, file := range prepare.Files {
 		if file.Size > receiver.config.MaxTotalBytes-totalSize {
@@ -218,7 +219,7 @@ func (receiver *Receiver) authorize(
 			return false, err
 		}
 		for _, found := range devices {
-			if found.Fingerprint == prepare.Info.Fingerprint {
+			if localsend.NormalizeFingerprint(found.Fingerprint) == prepare.Info.Fingerprint {
 				return true, nil
 			}
 		}

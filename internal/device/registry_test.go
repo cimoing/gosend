@@ -22,15 +22,18 @@ func TestRegistryUpsertAndExpiry(t *testing.T) {
 	}
 	if registry.Upsert(localsend.DeviceInfo{
 		Alias:       "Renamed Phone",
-		Fingerprint: "phone-fingerprint",
+		Fingerprint: "PHONE-FINGERPRINT",
 		Port:        53317,
 		Protocol:    "https",
 	}, "192.168.1.11") {
-		t.Fatal("second Upsert() = true, want existing device")
+		t.Fatal("case-variant Upsert() = true, want existing device")
 	}
-	found, ok := registry.Get("phone-fingerprint")
+	found, ok := registry.Get("PHONE-FINGERPRINT")
 	if !ok || found.Info.Alias != "Renamed Phone" || found.IP != "192.168.1.11" {
 		t.Fatalf("Get() = %+v, %v", found, ok)
+	}
+	if found.Info.Fingerprint != "phone-fingerprint" || len(registry.List()) != 1 {
+		t.Fatalf("canonical device = %+v, list = %+v", found, registry.List())
 	}
 
 	now = now.Add(time.Minute + time.Nanosecond)

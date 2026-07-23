@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gosend/internal/domain"
+	"gosend/internal/localsend"
 )
 
 type Memory struct {
@@ -59,6 +60,7 @@ func (store *Memory) SetSetting(_ context.Context, key, value string) error {
 }
 
 func (store *Memory) UpsertTrustedDevice(_ context.Context, device domain.TrustedDevice) error {
+	device.Fingerprint = localsend.NormalizeFingerprint(device.Fingerprint)
 	if err := device.Validate(); err != nil {
 		return err
 	}
@@ -86,13 +88,11 @@ func (store *Memory) ListTrustedDevices(context.Context) ([]domain.TrustedDevice
 	for _, device := range store.devices {
 		devices = append(devices, device)
 	}
-	sort.Slice(devices, func(left, right int) bool {
-		return devices[left].Alias < devices[right].Alias
-	})
-	return devices, nil
+	return deduplicateTrustedDevices(devices), nil
 }
 
 func (store *Memory) DeleteTrustedDevice(_ context.Context, fingerprint string) error {
+	fingerprint = localsend.NormalizeFingerprint(fingerprint)
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if _, ok := store.devices[fingerprint]; !ok {

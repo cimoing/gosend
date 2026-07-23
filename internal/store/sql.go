@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gosend/internal/domain"
+	"gosend/internal/localsend"
 )
 
 type SQL struct {
@@ -62,6 +63,7 @@ func (store *SQL) SetSetting(ctx context.Context, key, value string) error {
 }
 
 func (store *SQL) UpsertTrustedDevice(ctx context.Context, device domain.TrustedDevice) error {
+	device.Fingerprint = localsend.NormalizeFingerprint(device.Fingerprint)
 	if err := device.Validate(); err != nil {
 		return err
 	}
@@ -140,19 +142,20 @@ func (store *SQL) ListTrustedDevices(ctx context.Context) ([]domain.TrustedDevic
 		if device.UpdatedAt, err = parseTime(updatedAt); err != nil {
 			return nil, err
 		}
+		device.Fingerprint = localsend.NormalizeFingerprint(device.Fingerprint)
 		devices = append(devices, device)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list trusted devices: %w", err)
 	}
-	return devices, nil
+	return deduplicateTrustedDevices(devices), nil
 }
 
 func (store *SQL) DeleteTrustedDevice(ctx context.Context, fingerprint string) error {
 	result, err := store.database.ExecContext(
 		ctx,
-		store.query("DELETE FROM trusted_devices WHERE fingerprint = ?"),
-		fingerprint,
+		store.query("DELETE FROM trusted_devices WHERE LOWER(REPLACE(fingerprint, ':', '')) = ?"),
+		localsend.NormalizeFingerprint(fingerprint),
 	)
 	if err != nil {
 		return fmt.Errorf("delete trusted device: %w", err)
