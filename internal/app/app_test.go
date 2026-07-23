@@ -95,8 +95,8 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		{path: "/api/v1/devices", want: `"devices":[]`},
 		{path: "/api/v1/receive-requests", want: `"requests":[]`},
 		{path: "/api/v1/send-progress", want: `"sessions":[]`},
-		{path: "/", want: "接收文件"},
-		{path: "/app.js", want: "const state="},
+		{path: "/", want: "传入请求"},
+		{path: "/app.js", want: "const state"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		response := httptest.NewRecorder()
@@ -113,6 +113,9 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		}
 		if !strings.Contains(string(body), test.want) {
 			t.Errorf("%s body = %q, want substring %q", test.path, body, test.want)
+		}
+		if test.path == "/app.js" && strings.Contains(string(body), "setInterval(") {
+			t.Error("app.js contains timer-based polling")
 		}
 	}
 

@@ -1,19 +1,356 @@
-const state={status:null,devices:[],trusted:[],files:[],pending:[],sending:[],transfers:[],selected:new Set()};
-const $=s=>document.querySelector(s); const $$=s=>[...document.querySelectorAll(s)];
-const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const size=n=>{if(n<1024)return`${n} B`;const u=["KB","MB","GB","TB"];let i=-1;do{n/=1024;i++}while(n>=1024&&i<u.length-1);return`${n.toFixed(n<10?1:0)} ${u[i]}`};
-async function api(path,options){const r=await fetch(path,options);if(!r.ok)throw new Error((await r.text()).trim()||`HTTP ${r.status}`);if(r.status===204)return null;return r.json()}
-function toast(message){const e=$("#toast");e.textContent=message;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),2400)}
-async function refresh(){try{const [status,devices,trusted,files,pending,sending,transfers]=await Promise.all([api("/api/v1/status"),api("/api/v1/devices"),api("/api/v1/trusted-devices"),api("/api/v1/files"),api("/api/v1/receive-requests"),api("/api/v1/send-progress"),api("/api/v1/transfers")]);Object.assign(state,{status,devices:devices.devices||[],trusted:trusted.devices||[],files:files.files||[],pending:pending.requests||[],sending:sending.sessions||[],transfers:transfers.transfers||[]});render()}catch(e){$("#health-dot").classList.remove("on");toast(e.message)}}
-function render(){const trusted=new Set(state.trusted.map(d=>d.Fingerprint));const selectedTarget=$("#target-device").value;$("#health-dot").classList.toggle("on",!!state.status?.ready);$("#node-alias").textContent=state.status?.alias||"GoSend";$("#device-count").textContent=state.devices.length;$("#receive-count").textContent=state.pending.length;$("#receive-policy").textContent=({manual:"手动确认",trusted:"仅信任设备",auto:"自动接收"})[state.status?.receivePolicy]||state.status?.receivePolicy||"未知";$("#metric-devices").textContent=state.devices.length;$("#metric-pending").textContent=state.pending.length;$("#metric-sending").textContent=state.sending.length;
-$("#device-list").innerHTML=state.devices.length?state.devices.map(d=>`<article><p class="meta">${esc(d.info.deviceType||"device")} · ${esc(d.ip)}:${d.info.port}</p><h3>${esc(d.info.alias)}</h3><p class="meta">${esc(d.info.fingerprint)}</p><div class="actions"><button data-trust="${esc(d.info.fingerprint)}">${trusted.has(d.info.fingerprint)?"已信任":"设为信任"}</button><button class="primary" data-target="${esc(d.info.fingerprint)}">发送文件</button></div></article>`).join(""):`<div class="empty">暂无在线设备，请确认处于同一局域网</div>`;
-$("#trusted-list").innerHTML=state.trusted.length?state.trusted.map(d=>`<div class="trusted"><div><strong>${esc(d.Alias)}</strong><div class="meta">${esc(d.Fingerprint)}</div></div><button data-untrust="${esc(d.Fingerprint)}">取消信任</button></div>`).join(""):`<div class="empty">暂无信任设备</div>`;
-const pendingHTML=state.pending.length?state.pending.map(r=>{const files=Object.values(r.files||{});return`<div class="request"><div><strong>${esc(r.info.alias)}</strong><div class="meta">${files.length} 个文件 · ${size(files.reduce((n,f)=>n+(f.size||0),0))} · ${esc(r.ip)}</div><div class="request-files">${files.map(f=>`<span>${esc(f.fileName)} <small>${size(f.size||0)}</small></span>`).join("")}</div></div><div class="actions"><button data-decide="${esc(r.id)}/reject">拒绝</button><button class="primary" data-decide="${esc(r.id)}/accept">接收</button></div></div>`}).join(""):`<div class="empty">暂无待确认请求</div>`;$("#pending-list").innerHTML=pendingHTML;$("#pending-summary").innerHTML=pendingHTML;
-$("#file-list").innerHTML=state.files.length?state.files.map(f=>`<label><input type="checkbox" data-file="${esc(f.path)}" ${state.selected.has(f.path)?"checked":""}><span><strong>${esc(f.name)}</strong><small> ${esc(f.path)}</small></span><small>${size(f.size)}</small></label>`).join(""):`<div class="empty">发送目录中没有普通文件</div>`;$("#selected-count").textContent=state.selected.size;
-$("#target-device").innerHTML=`<option value="">选择在线设备</option>`+state.devices.map(d=>`<option value="${esc(d.info.fingerprint)}">${esc(d.info.alias)}</option>`).join("");if(state.devices.some(d=>d.info.fingerprint===selectedTarget))$("#target-device").value=selectedTarget;
-$("#progress-list").innerHTML=state.sending.length?state.sending.map(s=>`<div class="progress"><div><strong>${esc(s.sessionId)}</strong><div class="meta">${s.files.map(f=>`${esc(f.name)} ${size(f.sent)}/${size(f.size)}`).join(" · ")}</div></div><button data-cancel="${s.sessionId}">取消</button></div>`).join(""):`<div class="empty">暂无活动发送</div>`;
-$("#transfer-list").innerHTML=state.transfers.map(t=>`<tr><td>${t.Direction==="incoming"?"接收":"发送"}</td><td>${esc(t.PeerAlias)}</td><td><span class="status ${esc(t.Status)}">${esc(t.Status)}</span></td><td>${new Date(t.CreatedAt).toLocaleString()}</td><td>${esc(t.Error||"—")}</td></tr>`).join("")||`<tr><td colspan="5" class="empty">暂无传输记录</td></tr>`}
-document.addEventListener("click",async e=>{const a=e.target.closest("[data-page]");if(a){e.preventDefault();$$("[data-page],.page").forEach(x=>x.classList.remove("active"));const nav=$(`nav [data-page="${a.dataset.page}"]`);if(nav)nav.classList.add("active");$("#"+a.dataset.page).classList.add("active")}if(e.target.matches("[data-refresh]"))refresh();if(e.target.dataset.target){location.hash="files";$('[data-page="files"]').click();$("#target-device").value=e.target.dataset.target}try{if(e.target.matches("[data-discover]")){const result=await api("/api/v1/discovery/scan",{method:"POST"});toast(result.started?"已开始扫描局域网设备":"扫描正在进行");setTimeout(refresh,1800)}if(e.target.dataset.trust){await api(`/api/v1/trusted-devices/${e.target.dataset.trust}`,{method:"POST"});toast("设备已信任");refresh()}if(e.target.dataset.untrust){await api(`/api/v1/trusted-devices/${e.target.dataset.untrust}`,{method:"DELETE"});toast("已取消信任");refresh()}if(e.target.dataset.decide){const accepting=e.target.dataset.decide.endsWith("/accept");await api(`/api/v1/receive-requests/${e.target.dataset.decide}`,{method:"POST"});toast(accepting?"已接受接收请求":"已拒绝接收请求");refresh()}if(e.target.dataset.cancel){await api(`/api/v1/send/${e.target.dataset.cancel}/cancel`,{method:"POST"});toast("正在取消")}}catch(err){toast(err.message)}});
-document.addEventListener("change",e=>{if(e.target.dataset.file){e.target.checked?state.selected.add(e.target.dataset.file):state.selected.delete(e.target.dataset.file);$("#selected-count").textContent=state.selected.size}});
-$("#send-button").addEventListener("click",async()=>{const fingerprint=$("#target-device").value;if(!fingerprint||!state.selected.size)return toast("请选择设备和文件");try{await api("/api/v1/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fingerprint,files:[...state.selected],pin:$("#send-pin").value})});state.selected.clear();toast("发送任务已创建");refresh()}catch(e){toast(e.message)}});
-try{const events=new EventSource("/api/v1/events");events.addEventListener("snapshot",()=>refresh())}catch{}refresh();setInterval(refresh,10000);
+const state = {
+  status: null,
+  devices: [],
+  trusted: [],
+  pending: [],
+  sending: [],
+  transfers: [],
+  selectedFiles: new Map(),
+  selectedDirectories: new Map(),
+  target: "",
+  pickerMode: "file",
+  directory: { path: "", parent: "", entries: [] },
+  connected: false,
+};
+
+const $ = selector => document.querySelector(selector);
+const $$ = selector => [...document.querySelectorAll(selector)];
+const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+})[char]);
+const size = value => {
+  let bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let index = -1;
+  do { bytes /= 1024; index += 1; } while (bytes >= 1024 && index < units.length - 1);
+  return `${bytes.toFixed(bytes < 10 ? 1 : 0)} ${units[index]}`;
+};
+const policyName = value => ({ manual: "手动确认", trusted: "仅信任设备", auto: "自动接收" })[value] || value || "未知";
+const statusName = value => ({
+  pending: "等待中", active: "进行中", completed: "已完成", failed: "失败",
+  cancelled: "已取消", rejected: "已拒绝",
+})[value] || value || "未知";
+const deviceGlyph = type => ({ mobile: "▯", desktop: "▱", server: "▦", web: "◇", headless: "▤" })[type] || "◆";
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+let toastTimer;
+function toast(message) {
+  const element = $("#toast");
+  element.textContent = message;
+  element.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => element.classList.remove("show"), 2600);
+}
+
+function showPage(name) {
+  const page = document.getElementById(name);
+  if (!page) return;
+  $$(".page").forEach(element => element.classList.toggle("active", element === page));
+  $$(".sidebar [data-page]").forEach(element => element.classList.toggle("active", element.dataset.page === name));
+  history.replaceState(null, "", `#${name}`);
+}
+
+function applySnapshot(snapshot) {
+  state.status = snapshot.status || null;
+  state.devices = snapshot.devices || [];
+  state.trusted = snapshot.trusted || [];
+  state.pending = snapshot.pending || [];
+  state.sending = snapshot.sending || [];
+  state.transfers = snapshot.transfers || [];
+  if (state.target && !state.devices.some(device => device.info.fingerprint === state.target)) state.target = "";
+  render();
+}
+
+function render() {
+  const trusted = new Set(state.trusted.map(device => device.Fingerprint));
+  const alias = state.status?.alias || "GoSend";
+  const fingerprint = state.status?.fingerprint || "";
+  $("#health-dot").classList.toggle("on", state.connected);
+  $("#connection-label").textContent = state.connected ? "实时连接正常" : "正在重新连接";
+  $("#node-alias").textContent = alias;
+  $("#node-code").textContent = fingerprint ? `#${fingerprint.slice(0, 4).toUpperCase()} · LocalSend ${state.status?.protocolVersion || ""}` : "正在载入节点身份";
+  $("#receive-policy").textContent = policyName(state.status?.receivePolicy);
+  $("#receive-count").textContent = state.pending.length;
+  $("#pending-indicator").textContent = `${state.pending.length} 个待处理`;
+
+  $("#pending-list").innerHTML = state.pending.length
+    ? state.pending.map(request => {
+      const files = Object.values(request.files || {});
+      const total = files.reduce((sum, file) => sum + (file.size || 0), 0);
+      return `<article class="incoming-card">
+        <div class="device-avatar">${esc(deviceGlyph(request.info.deviceType))}</div>
+        <div>
+          <h3>${esc(request.info.alias)}</h3>
+          <div class="meta">${files.length} 个文件 · ${size(total)} · ${esc(request.ip)}</div>
+          <div class="file-tags">${files.slice(0, 6).map(file => `<span>${esc(file.fileName)} · ${size(file.size)}</span>`).join("")}${files.length > 6 ? `<span>+${files.length - 6}</span>` : ""}</div>
+        </div>
+        <div class="actions">
+          <button class="danger" data-decide="${esc(request.id)}/reject">拒绝</button>
+          <button class="primary" data-decide="${esc(request.id)}/accept">接收</button>
+        </div>
+      </article>`;
+    }).join("")
+    : `<div class="empty-state"><span>⌁</span><strong>等待其他设备</strong><p>保持此页面打开，新的文件请求会实时出现。</p></div>`;
+
+  $("#device-list").innerHTML = state.devices.length
+    ? state.devices.map(device => {
+      const info = device.info;
+      const isTrusted = trusted.has(info.fingerprint);
+      return `<article class="device-card ${state.target === info.fingerprint ? "selected" : ""}" data-target="${esc(info.fingerprint)}">
+        <div class="device-avatar">${esc(deviceGlyph(info.deviceType))}</div>
+        <div><h3>${esc(info.alias)}</h3><div class="meta">${esc(info.deviceModel || info.deviceType || "LocalSend")} · ${esc(device.ip)}:${info.port}</div></div>
+        <button class="heart ${isTrusted ? "on" : ""}" data-trust-toggle="${esc(info.fingerprint)}" data-trusted="${isTrusted}" title="${isTrusted ? "取消信任" : "设为信任"}">♡</button>
+      </article>`;
+    }).join("")
+    : `<div class="empty-state compact"><strong>没有发现在线设备</strong><p>请确认设备在同一个局域网，然后点击重新发现。</p></div>`;
+
+  renderSelection();
+  const target = state.devices.find(device => device.info.fingerprint === state.target);
+  $("#target-label").textContent = target?.info.alias || "请选择设备";
+  $("#send-button").disabled = !target || selectionCount() === 0;
+
+  $("#progress-list").innerHTML = state.sending.map(session => {
+    const total = session.files.reduce((sum, file) => sum + file.size, 0);
+    const sent = session.files.reduce((sum, file) => sum + file.sent, 0);
+    const percent = total ? Math.min(100, Math.round(sent / total * 100)) : 0;
+    return `<article class="progress-card">
+      <div class="progress-line"><strong>${statusName(session.status)} · ${session.files.length} 个文件</strong><span>${percent}%</span></div>
+      <div class="progress-bar"><i style="width:${percent}%"></i></div>
+      <div class="progress-line meta"><span>${size(sent)} / ${size(total)}</span><button class="text-button danger" data-cancel="${esc(session.sessionId)}">取消</button></div>
+    </article>`;
+  }).join("");
+
+  const completed = state.transfers.filter(transfer => transfer.Status === "completed").length;
+  const active = state.transfers.filter(transfer => transfer.Status === "active" || transfer.Status === "pending").length;
+  $("#history-total").textContent = state.transfers.length;
+  $("#history-completed").textContent = completed;
+  $("#history-active").textContent = active;
+  $("#transfer-list").innerHTML = state.transfers.length
+    ? state.transfers.map(transfer => `<article class="history-card">
+      <div class="file-avatar">${transfer.Direction === "incoming" ? "↓" : "↑"}</div>
+      <div><h3>${transfer.Direction === "incoming" ? "接收自" : "发送至"} ${esc(transfer.PeerAlias)}</h3><div class="meta">${new Date(transfer.CreatedAt).toLocaleString()}${transfer.Error ? ` · ${esc(transfer.Error)}` : ""}</div></div>
+      <span class="history-status ${esc(transfer.Status)}">${esc(statusName(transfer.Status))}</span>
+    </article>`).join("")
+    : `<div class="empty-state"><strong>暂无传输记录</strong><p>完成的发送和接收会显示在这里。</p></div>`;
+
+  $("#setting-alias").textContent = alias;
+  $("#setting-policy").textContent = policyName(state.status?.receivePolicy);
+  $("#setting-database").textContent = state.status?.database || "—";
+  $("#setting-fingerprint").textContent = fingerprint || "—";
+  $("#trusted-list").innerHTML = state.trusted.length
+    ? state.trusted.map(device => `<div class="trusted-row">
+      <div class="device-avatar">${esc(deviceGlyph(device.DeviceType))}</div>
+      <div><strong>${esc(device.Alias)}</strong><div class="meta">${esc(device.DeviceModel || device.DeviceType || "LocalSend")}</div></div>
+      <button data-untrust="${esc(device.Fingerprint)}">移除</button>
+    </div>`).join("")
+    : `<div class="empty-state compact"><strong>暂无信任设备</strong><p>可在“发送”页面点击设备右侧的心形按钮添加。</p></div>`;
+}
+
+function selectionCount() {
+  return state.selectedFiles.size + state.selectedDirectories.size;
+}
+
+function renderSelection() {
+  const chips = [
+    ...[...state.selectedFiles].map(([path, name]) => ({ path, name, type: "file" })),
+    ...[...state.selectedDirectories].map(([path, name]) => ({ path, name, type: "directory" })),
+  ];
+  $("#selected-count").textContent = chips.length;
+  $("#selected-items").innerHTML = chips.length
+    ? chips.map(item => `<span class="selected-chip"><b>${item.type === "directory" ? "▰" : "▤"}</b><span title="${esc(item.path)}">${esc(item.name)}</span><button data-remove-selection="${esc(item.type)}:${esc(item.path)}" aria-label="移除">×</button></span>`).join("")
+    : `<span class="muted">尚未选择文件</span>`;
+  $("#picker-count").textContent = chips.length;
+}
+
+async function openPicker(mode, path = "") {
+  state.pickerMode = mode;
+  $("#picker-eyebrow").textContent = mode === "directory" ? "SELECT FOLDERS" : "SELECT FILES";
+  $("#picker-title").textContent = mode === "directory" ? "选择文件夹" : "选择文件";
+  $("#select-current-directory").hidden = mode !== "directory";
+  await browse(path);
+  if (!$("#file-picker").open) $("#file-picker").showModal();
+}
+
+async function browse(path) {
+  $("#picker-list").innerHTML = `<div class="empty-state compact"><strong>正在读取目录</strong></div>`;
+  try {
+    state.directory = await api(`/api/v1/files?path=${encodeURIComponent(path)}`);
+    renderPicker();
+  } catch (error) {
+    $("#picker-list").innerHTML = `<div class="empty-state compact"><strong>无法读取目录</strong><p>${esc(error.message)}</p></div>`;
+  }
+}
+
+function renderPicker() {
+  const parts = state.directory.path ? state.directory.path.split("/") : [];
+  const breadcrumbs = [{ name: "发送目录", path: "" }];
+  parts.forEach((part, index) => breadcrumbs.push({ name: part, path: parts.slice(0, index + 1).join("/") }));
+  $("#picker-breadcrumbs").innerHTML = breadcrumbs.map((item, index) =>
+    `${index ? "<i>›</i>" : ""}<button data-browse="${esc(item.path)}">${esc(item.name)}</button>`).join("");
+
+  const rows = [];
+  if (state.directory.path) {
+    rows.push(`<div class="picker-row">
+      <span class="entry-icon">↰</span>
+      <button class="entry-main" data-browse="${esc(state.directory.parent)}"><strong>返回上一级</strong><small>${esc(state.directory.parent || "发送目录")}</small></button>
+      <span></span>
+    </div>`);
+  }
+  rows.push(...state.directory.entries.map(entry => {
+    const isDirectory = entry.type === "directory";
+    const selectable = state.pickerMode === "directory" ? isDirectory : !isDirectory;
+    const selected = isDirectory ? state.selectedDirectories.has(entry.path) : state.selectedFiles.has(entry.path);
+    return `<div class="picker-row">
+      <span class="entry-icon">${isDirectory ? "▰" : "▤"}</span>
+      <button class="entry-main" ${isDirectory ? `data-browse="${esc(entry.path)}"` : selectable ? `data-pick-type="file" data-pick-path="${esc(entry.path)}" data-pick-name="${esc(entry.name)}"` : ""}>
+        <strong>${esc(entry.name)}</strong><small>${isDirectory ? "文件夹" : `${size(entry.size)} · ${new Date(entry.modified).toLocaleDateString()}`}</small>
+      </button>
+      ${selectable ? `<button class="pick-toggle ${selected ? "selected" : ""}" data-pick-type="${entry.type}" data-pick-path="${esc(entry.path)}" data-pick-name="${esc(entry.name)}">${selected ? "✓" : ""}</button>` : "<span></span>"}
+    </div>`;
+  }));
+  $("#picker-list").innerHTML = rows.length
+    ? rows.join("")
+    : `<div class="empty-state compact"><strong>此目录为空</strong></div>`;
+  renderSelection();
+}
+
+function toggleSelection(type, path, name) {
+  const collection = type === "directory" ? state.selectedDirectories : state.selectedFiles;
+  collection.has(path) ? collection.delete(path) : collection.set(path, name || path.split("/").pop() || "发送目录");
+  renderSelection();
+  renderPicker();
+}
+
+function connectEvents() {
+  const events = new EventSource("/api/v1/events");
+  events.onopen = () => {
+    state.connected = true;
+    render();
+  };
+  events.addEventListener("snapshot", event => {
+    state.connected = true;
+    try { applySnapshot(JSON.parse(event.data)); } catch { toast("实时数据解析失败"); }
+  });
+  events.addEventListener("error", event => {
+    if (event.data) toast(event.data.replace(/^"|"$/g, ""));
+  });
+  events.onerror = () => {
+    state.connected = false;
+    render();
+  };
+}
+
+document.addEventListener("click", async event => {
+  const pageLink = event.target.closest("[data-page]");
+  if (pageLink) {
+    event.preventDefault();
+    showPage(pageLink.dataset.page);
+    return;
+  }
+  try {
+    const pickerButton = event.target.closest("[data-open-picker]");
+    if (pickerButton) return await openPicker(pickerButton.dataset.openPicker);
+    if (event.target.closest("[data-close-picker]")) return $("#file-picker").close();
+    const browseButton = event.target.closest("[data-browse]");
+    if (browseButton) return await browse(browseButton.dataset.browse);
+    const pickButton = event.target.closest("[data-pick-type]");
+    if (pickButton) return toggleSelection(pickButton.dataset.pickType, pickButton.dataset.pickPath, pickButton.dataset.pickName);
+    if (event.target.closest("#select-current-directory")) {
+      const path = state.directory.path;
+      return toggleSelection("directory", path, path.split("/").pop() || "发送目录");
+    }
+    const remove = event.target.closest("[data-remove-selection]");
+    if (remove) {
+      const separator = remove.dataset.removeSelection.indexOf(":");
+      const type = remove.dataset.removeSelection.slice(0, separator);
+      const path = remove.dataset.removeSelection.slice(separator + 1);
+      (type === "directory" ? state.selectedDirectories : state.selectedFiles).delete(path);
+      render();
+      return;
+    }
+    if (event.target.closest("[data-clear-selection]")) {
+      state.selectedFiles.clear();
+      state.selectedDirectories.clear();
+      render();
+      return;
+    }
+    if (event.target.closest("[data-discover]")) {
+      const result = await api("/api/v1/discovery/scan", { method: "POST" });
+      toast(result.started ? "正在重新发现局域网设备" : "设备扫描正在进行");
+      return;
+    }
+    const trustButton = event.target.closest("[data-trust-toggle]");
+    if (trustButton) {
+      event.stopPropagation();
+      const path = `/api/v1/trusted-devices/${encodeURIComponent(trustButton.dataset.trustToggle)}`;
+      await api(path, { method: trustButton.dataset.trusted === "true" ? "DELETE" : "POST" });
+      toast(trustButton.dataset.trusted === "true" ? "已取消信任" : "设备已设为信任");
+      return;
+    }
+    const untrustButton = event.target.closest("[data-untrust]");
+    if (untrustButton) {
+      await api(`/api/v1/trusted-devices/${encodeURIComponent(untrustButton.dataset.untrust)}`, { method: "DELETE" });
+      toast("已移除信任设备");
+      return;
+    }
+    const target = event.target.closest("[data-target]");
+    if (target) {
+      state.target = target.dataset.target;
+      render();
+      return;
+    }
+    const decision = event.target.closest("[data-decide]");
+    if (decision) {
+      const accepting = decision.dataset.decide.endsWith("/accept");
+      await api(`/api/v1/receive-requests/${decision.dataset.decide}`, { method: "POST" });
+      toast(accepting ? "已接受文件请求" : "已拒绝文件请求");
+      return;
+    }
+    const cancel = event.target.closest("[data-cancel]");
+    if (cancel) {
+      await api(`/api/v1/send/${encodeURIComponent(cancel.dataset.cancel)}/cancel`, { method: "POST" });
+      toast("正在取消发送");
+    }
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+$("#send-button").addEventListener("click", async () => {
+  if (!state.target || selectionCount() === 0) return toast("请选择文件和目标设备");
+  try {
+    await api("/api/v1/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fingerprint: state.target,
+        files: [...state.selectedFiles.keys()],
+        directories: [...state.selectedDirectories.keys()],
+        pin: $("#send-pin").value,
+      }),
+    });
+    state.selectedFiles.clear();
+    state.selectedDirectories.clear();
+    $("#send-pin").value = "";
+    render();
+    toast("发送任务已创建");
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+$("#file-picker").addEventListener("cancel", event => {
+  event.preventDefault();
+  $("#file-picker").close();
+});
+
+showPage(location.hash.slice(1) || "receive");
+render();
+connectEvents();

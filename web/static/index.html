@@ -3,58 +3,157 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0b1220">
-    <title>GoSend 控制台</title>
+    <meta name="theme-color" content="#0c1714">
+    <title>GoSend</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <header>
-      <a class="brand" href="#overview"><span>G</span>GoSend</a>
-      <div class="node"><i id="health-dot"></i><strong id="node-alias">正在连接</strong><small>LocalSend 节点</small></div>
-    </header>
-    <div class="layout">
-      <nav aria-label="主导航">
-        <a href="#overview" data-page="overview" class="active">概览</a>
-        <a href="#devices" data-page="devices">附近设备 <b id="device-count">0</b></a>
-        <a href="#receive" data-page="receive">接收文件 <b id="receive-count">0</b></a>
-        <a href="#files" data-page="files">发送文件</a>
-        <a href="#transfers" data-page="transfers">传输记录</a>
-      </nav>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="#receive" aria-label="GoSend 首页">
+          <span class="brand-mark">G</span>
+          <strong>GoSend</strong>
+        </a>
+        <nav aria-label="主导航">
+          <a href="#receive" data-page="receive" class="active">
+            <span class="nav-icon">⌁</span><span>接收</span><b id="receive-count">0</b>
+          </a>
+          <a href="#send" data-page="send">
+            <span class="nav-icon">➤</span><span>发送</span>
+          </a>
+          <a href="#history" data-page="history">
+            <span class="nav-icon">↶</span><span>历史</span>
+          </a>
+          <a href="#settings" data-page="settings">
+            <span class="nav-icon">⚙</span><span>设置</span>
+          </a>
+        </nav>
+        <div class="connection">
+          <i id="health-dot"></i>
+          <div><strong id="connection-label">正在连接</strong><small>SSE 实时通道</small></div>
+        </div>
+      </aside>
+
       <main>
-        <section id="overview" class="page active">
-          <div class="title"><div><p>节点概览</p><h1>局域网文件流转，一眼可见</h1></div><button data-refresh>刷新</button></div>
-          <div class="metrics">
-            <article><small>在线设备</small><strong id="metric-devices">0</strong><span>最近 90 秒内发现</span></article>
-            <article><small>待确认接收</small><strong id="metric-pending">0</strong><span>手动策略请求</span></article>
-            <article><small>正在发送</small><strong id="metric-sending">0</strong><span>多文件会话</span></article>
+        <section id="receive" class="page active">
+          <div class="page-tools">
+            <button class="icon-button" data-page="history" title="传输历史">↶</button>
+            <button class="icon-button" data-page="settings" title="节点信息">ⓘ</button>
           </div>
-          <div class="panel"><div class="panel-head"><div><p>待处理</p><h2>接收请求</h2></div><button data-page="receive">进入接收管理</button></div><div id="pending-summary" class="empty">暂无待确认请求</div></div>
-        </section>
-        <section id="devices" class="page">
-          <div class="title"><div><p>LocalSend Discovery</p><h1>附近设备</h1></div><button data-discover>重新发现</button></div>
-          <div id="device-list" class="cards"></div>
-          <div class="panel"><div class="panel-head"><div><p>持久身份</p><h2>信任设备</h2></div></div><div id="trusted-list"></div></div>
-        </section>
-        <section id="receive" class="page">
-          <div class="title"><div><p>LocalSend Receive</p><h1>接收文件</h1></div><button data-refresh>刷新请求</button></div>
-          <div class="panel receive-guide">
-            <div><p class="meta">当前接收策略</p><strong id="receive-policy">正在读取</strong></div>
-            <p class="meta">手动策略下，请在发送端保持请求页面打开，并在 60 秒内于下方接受或拒绝。接受后的多个文件会写入固定接收目录。</p>
+          <div class="receive-hero">
+            <div class="radar" aria-hidden="true"><span>G</span></div>
+            <h1 id="node-alias">GoSend</h1>
+            <p id="node-code">正在载入节点身份</p>
+            <div class="policy">
+              <small>接收策略</small>
+              <strong id="receive-policy">正在读取</strong>
+            </div>
           </div>
-          <div class="panel"><div class="panel-head"><div><p>待处理</p><h2>传入请求</h2></div></div><div id="pending-list" class="empty">暂无待确认请求</div></div>
+          <div class="incoming-wrap">
+            <div class="section-heading">
+              <div><span>INCOMING</span><h2>传入请求</h2></div>
+              <b id="pending-indicator">0 个待处理</b>
+            </div>
+            <div id="pending-list" class="incoming-list">
+              <div class="empty-state"><span>⌁</span><strong>等待其他设备</strong><p>保持此页面打开，新的文件请求会实时出现。</p></div>
+            </div>
+          </div>
         </section>
-        <section id="files" class="page">
-          <div class="title"><div><p>固定发送目录</p><h1>选择要发送的文件</h1></div><button data-refresh>扫描目录</button></div>
-          <div class="sendbar"><span>已选择 <strong id="selected-count">0</strong> 个文件</span><select id="target-device" aria-label="目标设备"><option value="">选择在线设备</option></select><input id="send-pin" inputmode="numeric" placeholder="PIN（可选）" aria-label="接收端 PIN"><button id="send-button" class="primary">开始发送</button></div>
-          <div class="panel"><div id="file-list" class="file-list"></div></div>
-          <div class="panel"><div class="panel-head"><div><p>实时状态</p><h2>发送进度</h2></div></div><div id="progress-list" class="empty">暂无活动发送</div></div>
+
+        <section id="send" class="page">
+          <header class="page-title">
+            <div><span>SEND</span><h1>发送</h1><p>从固定发送目录中选择文件，然后选择附近设备。</p></div>
+          </header>
+          <div class="choice-grid">
+            <button class="choice-card" data-open-picker="file">
+              <span class="choice-icon">▤</span>
+              <strong>文件</strong>
+              <small>可多选</small>
+            </button>
+            <button class="choice-card" data-open-picker="directory">
+              <span class="choice-icon">▰</span>
+              <strong>文件夹</strong>
+              <small>包含全部子目录</small>
+            </button>
+          </div>
+
+          <div id="selection-panel" class="selection-panel">
+            <div><small>已选择</small><strong><span id="selected-count">0</span> 项</strong></div>
+            <div id="selected-items" class="selected-items"><span class="muted">尚未选择文件</span></div>
+            <button class="text-button" data-clear-selection>清空</button>
+          </div>
+
+          <div class="section-heading nearby-heading">
+            <div><span>NEARBY DEVICES</span><h2>附近的设备</h2></div>
+            <button class="icon-button" data-discover title="重新发现">⟳</button>
+          </div>
+          <div id="device-list" class="device-list">
+            <div class="empty-state compact"><strong>正在寻找设备</strong><p>请确保设备连接到同一个局域网。</p></div>
+          </div>
+
+          <div id="send-dock" class="send-dock">
+            <div class="send-target">
+              <small>发送至</small>
+              <strong id="target-label">请选择设备</strong>
+            </div>
+            <input id="send-pin" inputmode="numeric" autocomplete="off" placeholder="PIN（可选）" aria-label="接收端 PIN">
+            <button id="send-button" class="primary">开始发送</button>
+          </div>
+          <div id="progress-list" class="progress-list"></div>
         </section>
-        <section id="transfers" class="page">
-          <div class="title"><div><p>持久记录</p><h1>发送与接收历史</h1></div><button data-refresh>刷新记录</button></div>
-          <div class="panel table-wrap"><table><thead><tr><th>方向</th><th>设备</th><th>状态</th><th>开始时间</th><th>错误</th></tr></thead><tbody id="transfer-list"></tbody></table></div>
+
+        <section id="history" class="page">
+          <header class="page-title">
+            <div><span>ACTIVITY</span><h1>历史</h1><p>发送与接收记录会通过实时通道自动更新。</p></div>
+          </header>
+          <div class="history-summary">
+            <article><small>全部记录</small><strong id="history-total">0</strong></article>
+            <article><small>成功完成</small><strong id="history-completed">0</strong></article>
+            <article><small>进行中</small><strong id="history-active">0</strong></article>
+          </div>
+          <div id="transfer-list" class="history-list"></div>
+        </section>
+
+        <section id="settings" class="page">
+          <header class="page-title centered">
+            <div><span>SETTINGS</span><h1>设置</h1></div>
+          </header>
+          <div class="settings-card">
+            <h2>节点</h2>
+            <div class="setting-row"><span>设备名称</span><strong id="setting-alias">—</strong></div>
+            <div class="setting-row"><span>接收策略</span><strong id="setting-policy">—</strong></div>
+            <div class="setting-row"><span>数据库</span><strong id="setting-database">—</strong></div>
+            <div class="setting-row stack"><span>设备指纹</span><code id="setting-fingerprint">—</code></div>
+          </div>
+          <div class="settings-card">
+            <div class="card-title"><div><h2>信任设备</h2><p>信任策略下，仅接受这里列出的设备。</p></div></div>
+            <div id="trusted-list"></div>
+          </div>
+          <div class="settings-card">
+            <h2>实时连接</h2>
+            <div class="setting-row"><span>数据通道</span><strong>Server-Sent Events</strong></div>
+            <div class="setting-row"><span>轮询</span><strong>已关闭</strong></div>
+          </div>
         </section>
       </main>
     </div>
+
+    <dialog id="file-picker">
+      <div class="dialog-shell">
+        <header class="dialog-head">
+          <div><small id="picker-eyebrow">SELECT FILES</small><h2 id="picker-title">选择文件</h2></div>
+          <button class="icon-button" data-close-picker aria-label="关闭">×</button>
+        </header>
+        <nav id="picker-breadcrumbs" class="breadcrumbs" aria-label="目录路径"></nav>
+        <div id="picker-list" class="picker-list"></div>
+        <footer class="dialog-foot">
+          <div><small>当前已选择</small><strong><span id="picker-count">0</span> 项</strong></div>
+          <button id="select-current-directory" class="secondary">选择当前文件夹</button>
+          <button class="primary" data-close-picker>完成</button>
+        </footer>
+      </div>
+    </dialog>
+
     <div id="toast" role="status" aria-live="polite"></div>
     <script src="/app.js" defer></script>
   </body>

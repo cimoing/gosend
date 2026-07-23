@@ -2,13 +2,13 @@
 
 GoSend 是一个用 Go 编写、面向局域网常驻节点的 LocalSend 兼容文件传输服务。目标运行环境包括树莓派、NAS 和普通 Linux/Windows 主机，并提供浏览器管理界面。
 
-当前仓库已实现完整 LocalSend v2.1 收发链路和 Web 管理界面：可在桌面或移动浏览器中查看节点状态、附近/信任设备、固定目录文件、接收审批、发送进度和双向传输历史，并直接执行发现、信任、发送、取消与接收操作。
+当前仓库已实现完整 LocalSend v2.1 收发链路和客户端式 Web 管理界面：可在桌面或移动浏览器中查看节点状态、附近/信任设备、接收审批、发送进度和双向传输历史，并通过多级目录弹层选择文件或整个目录。业务状态使用 SSE 长连接实时推送，不依赖浏览器定时轮询。
 
 ## 设计目标
 
 - 兼容 LocalSend Protocol v2.1，支持局域网设备自动发现。
-- 支持从固定发送目录向指定在线设备发送一个或多个文件。
-- 支持接收单个或多个文件，并安全写入固定接收目录。
+- 支持从固定发送目录向指定在线设备发送多个文件或目录，并保留相对目录结构。
+- 支持接收单个或多个文件及目录，并安全写入固定接收目录。
 - 在 Web 界面管理在线设备、信任设备、发送记录和接收记录。
 - 单二进制部署，适合 ARM64/AMD64 Linux 节点和容器环境。
 
@@ -114,7 +114,7 @@ POST /api/v1/receive-requests/{id}/accept
 POST /api/v1/receive-requests/{id}/reject
 ```
 
-主动发送 API 接受在线设备指纹、固定发送目录下的相对文件名和可选 PIN：
+主动发送 API 接受在线设备指纹、固定发送目录下的相对文件名、相对目录和可选 PIN：
 
 ```text
 POST /api/v1/send
@@ -126,6 +126,7 @@ POST /api/v1/send/{sessionId}/cancel
 {
   "fingerprint": "device-certificate-fingerprint",
   "files": ["photo.jpg", "documents/report.pdf"],
+  "directories": ["project"],
   "pin": ""
 }
 ```
