@@ -2,7 +2,11 @@ package discovery
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,5 +62,49 @@ func TestRegisterRejectsInvalidBody(t *testing.T) {
 	service.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
+	}
+}
+
+func TestServerTimeoutsAllowManualApprovalAndLargeTransfers(t *testing.T) {
+	service := New(Config{Alias: "GoSend", Port: 53317, Fingerprint: "self"}, nil, nil)
+	if service.server.ReadTimeout != 0 {
+		t.Fatalf("ReadTimeout = %v, want no whole-upload deadline", service.server.ReadTimeout)
+	}
+	if service.server.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout = %v, want no manual-approval deadline", service.server.WriteTimeout)
+	}
+	if service.server.ReadHeaderTimeout == 0 {
+		t.Fatal("ReadHeaderTimeout = 0, want slow-header protection")
+	}
+}
+
+func TestRegisterAddressLearnsHTTPSFingerprintAndResponseDefaults(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/localsend/v2/register" {
+			http.NotFound(response, request)
+			return
+		}
+		writeJSON(response, http.StatusOK, localsend.DeviceInfo{
+			Alias:       "Nearby Phone",
+			Version:     localsend.ProtocolVersion,
+			Fingerprint: "ignored-for-https",
+		})
+	}))
+	defer server.Close()
+
+	port := server.Listener.Addr().(*net.TCPAddr).Port
+	service := New(Config{
+		Alias:       "GoSend",
+		Port:        port,
+		Fingerprint: "self",
+	}, device.NewRegistry(0), nil)
+	info, err := service.registerAddress(context.Background(), "https", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("registerAddress() error = %v", err)
+	}
+	sum := sha256.Sum256(server.Certificate().Raw)
+	wantFingerprint := hex.EncodeToString(sum[:])
+	if info.Fingerprint != wantFingerprint || info.Port != port || info.Protocol != "https" {
+		t.Fatalf("registerAddress() = %+v", info)
 	}
 }

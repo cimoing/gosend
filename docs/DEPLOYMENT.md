@@ -39,6 +39,15 @@ docker compose -f compose.yaml -f compose.desktop.yaml up -d --build
 
 开放 TCP/UDP `53317` 和 Web TCP `8080`。不要在访客网络开启 AP 隔离。绑定挂载目录必须允许容器 UID `10001` 写入。
 
+如果其他设备能发现 GoSend，但 GoSend 无法发现其他设备且无法接收文件，通常表示节点只允许出站流量。请重点检查：
+
+- 主机防火墙是否允许局域网入站 `53317/tcp` 和 `53317/udp`。
+- Compose 是否使用原生 Linux host 网络；LocalSend 依赖组播和对端看到的真实来源地址。
+- 路由器或无线接入点是否启用了 AP/客户端隔离。
+- Web “附近设备”页面执行“重新发现”后，HTTP 兜底扫描是否能找到设备。
+
+Docker Desktop 的 host networking 必须在 `Settings > Resources > Network > Enable host networking` 中显式启用。若容器只能看到 Docker VM 私网而看不到宿主机局域网地址，host networking 尚未生效。
+
 生产环境应设置 `GOSEND_WEB_AUTH_TOKEN`。如果 Web 界面只允许本机访问，可将 `GOSEND_WEB_ADDRESS` 改为 `127.0.0.1:8080` 并由带认证的反向代理发布。
 
 ## systemd

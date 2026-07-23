@@ -3,7 +3,9 @@ package discovery
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +29,11 @@ const (
 	maximumMessageSize = 64 << 10
 	requestTimeout     = 4 * time.Second
 	cleanupInterval    = 10 * time.Second
+	scanInterval       = 60 * time.Second
+	scanRequestTimeout = 750 * time.Millisecond
+	scanTimeout        = 20 * time.Second
+	maximumScanHosts   = 1024
+	maximumScanWorkers = 64
 )
 
 type Config struct {
@@ -44,6 +52,7 @@ type Service struct {
 	server   *http.Server
 	packet   *ipv4.PacketConn
 	sendMu   sync.Mutex
+	scanMu   sync.Mutex
 	register chan struct{}
 }
 
@@ -67,8 +76,6 @@ func New(config Config, registry *device.Registry, logger *slog.Logger) *Service
 		Addr:              ":" + strconv.Itoa(config.Port),
 		Handler:           service.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS12,
@@ -129,6 +136,7 @@ func (service *Service) Run(ctx context.Context) error {
 	if err := service.announce(true); err != nil {
 		service.logger.Warn("initial multicast announcement failed", "error", err)
 	}
+	service.startScan(runContext)
 
 	var runErr error
 	select {
@@ -279,8 +287,10 @@ func (service *Service) registerPeer(parent context.Context, announced localsend
 func (service *Service) periodic(ctx context.Context) error {
 	announceTicker := time.NewTicker(service.config.AnnounceInterval)
 	cleanupTicker := time.NewTicker(cleanupInterval)
+	scanTicker := time.NewTicker(scanInterval)
 	defer announceTicker.Stop()
 	defer cleanupTicker.Stop()
+	defer scanTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -293,8 +303,240 @@ func (service *Service) periodic(ctx context.Context) error {
 			for _, expired := range service.registry.RemoveExpired() {
 				service.logger.Debug("device expired", "alias", expired.Info.Alias, "fingerprint", expired.Info.Fingerprint)
 			}
+		case <-scanTicker.C:
+			service.startScan(ctx)
 		}
 	}
+}
+
+// TriggerScan starts the LocalSend HTTP fallback discovery in the background.
+// It returns false when another scan is already running.
+func (service *Service) TriggerScan() bool {
+	return service.startScan(context.Background())
+}
+
+func (service *Service) startScan(parent context.Context) bool {
+	if !service.scanMu.TryLock() {
+		return false
+	}
+	go func() {
+		defer service.scanMu.Unlock()
+		ctx, cancel := context.WithTimeout(parent, scanTimeout)
+		defer cancel()
+		found, scanned, err := service.scan(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			service.logger.Debug("HTTP fallback discovery failed", "error", err)
+			return
+		}
+		if found > 0 {
+			service.logger.Info("HTTP fallback discovery found devices", "found", found, "scanned", scanned)
+		} else {
+			service.logger.Debug("HTTP fallback discovery completed", "scanned", scanned)
+		}
+	}()
+	return true
+}
+
+func (service *Service) scan(ctx context.Context) (int, int, error) {
+	addresses, err := localScanAddresses()
+	if err != nil {
+		return 0, 0, err
+	}
+	type result struct {
+		found bool
+	}
+	jobs := make(chan netip.Addr)
+	results := make(chan result)
+	workers := maximumScanWorkers
+	if len(addresses) < workers {
+		workers = len(addresses)
+	}
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for address := range jobs {
+				found := service.probePeer(ctx, address.String())
+				select {
+				case results <- result{found: found}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, address := range addresses {
+			select {
+			case jobs <- address:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		wait.Wait()
+		close(results)
+	}()
+
+	found := 0
+	scanned := 0
+	for result := range results {
+		scanned++
+		if result.found {
+			found++
+		}
+	}
+	return found, scanned, ctx.Err()
+}
+
+func (service *Service) probePeer(parent context.Context, ip string) bool {
+	for _, protocol := range []string{"https", "http"} {
+		ctx, cancel := context.WithTimeout(parent, scanRequestTimeout)
+		info, err := service.registerAddress(ctx, protocol, ip)
+		cancel()
+		if err != nil {
+			continue
+		}
+		if info.Fingerprint == service.config.Fingerprint {
+			return false
+		}
+		return service.registry.Upsert(info, ip)
+	}
+	return false
+}
+
+func (service *Service) registerAddress(
+	ctx context.Context,
+	protocol string,
+	ip string,
+) (localsend.DeviceInfo, error) {
+	body, err := json.Marshal(service.SelfInfo(false))
+	if err != nil {
+		return localsend.DeviceInfo{}, err
+	}
+	url := protocol + "://" + net.JoinHostPort(ip, strconv.Itoa(service.config.Port)) +
+		"/api/localsend/v2/register"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return localsend.DeviceInfo{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	var certificateFingerprint string
+	if protocol == "https" {
+		transport.TLSClientConfig = &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true, // Discovery learns and pins the certificate fingerprint below.
+			VerifyConnection: func(state tls.ConnectionState) error {
+				if len(state.PeerCertificates) == 0 {
+					return errors.New("peer presented no certificate")
+				}
+				sum := sha256.Sum256(state.PeerCertificates[0].Raw)
+				certificateFingerprint = hex.EncodeToString(sum[:])
+				return nil
+			},
+		}
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   scanRequestTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errors.New("redirects are not allowed during discovery")
+		},
+	}
+	defer client.CloseIdleConnections()
+	response, err := client.Do(request)
+	if err != nil {
+		return localsend.DeviceInfo{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return localsend.DeviceInfo{}, fmt.Errorf("register returned HTTP %d", response.StatusCode)
+	}
+	var info localsend.DeviceInfo
+	decoder := json.NewDecoder(io.LimitReader(response.Body, maximumMessageSize))
+	if err := decoder.Decode(&info); err != nil {
+		return localsend.DeviceInfo{}, err
+	}
+	if protocol == "https" {
+		info.Fingerprint = certificateFingerprint
+	}
+	if info.Port == 0 {
+		info.Port = service.config.Port
+	}
+	if info.Protocol == "" {
+		info.Protocol = protocol
+	}
+	if !validPeer(info) {
+		return localsend.DeviceInfo{}, errors.New("invalid register response")
+	}
+	return info, nil
+}
+
+func localScanAddresses() ([]netip.Addr, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("list network interfaces: %w", err)
+	}
+	local := make(map[netip.Addr]struct{})
+	prefixes := make(map[netip.Prefix]struct{})
+	for _, networkInterface := range interfaces {
+		if networkInterface.Flags&net.FlagUp == 0 || networkInterface.Flags&net.FlagLoopback != 0 ||
+			virtualScanInterface(networkInterface.Name) {
+			continue
+		}
+		addresses, err := networkInterface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			prefix, err := netip.ParsePrefix(address.String())
+			if err != nil || !prefix.Addr().Is4() || !prefix.Addr().IsPrivate() {
+				continue
+			}
+			local[prefix.Addr()] = struct{}{}
+			bits := prefix.Bits()
+			if bits < 24 {
+				bits = 24
+			}
+			if bits >= 31 {
+				continue
+			}
+			prefixes[netip.PrefixFrom(prefix.Addr(), bits).Masked()] = struct{}{}
+		}
+	}
+
+	result := make([]netip.Addr, 0)
+	for prefix := range prefixes {
+		for address := prefix.Addr().Next(); prefix.Contains(address); address = address.Next() {
+			if len(result) >= maximumScanHosts {
+				return result, nil
+			}
+			if _, isLocal := local[address]; isLocal {
+				continue
+			}
+			next := address.Next()
+			if !prefix.Contains(next) {
+				break
+			}
+			result = append(result, address)
+		}
+	}
+	return result, nil
+}
+
+func virtualScanInterface(name string) bool {
+	name = strings.ToLower(name)
+	for _, prefix := range []string{"docker", "br-", "veth", "cni", "flannel"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (service *Service) announce(announce bool) error {

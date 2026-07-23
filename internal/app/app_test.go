@@ -79,6 +79,7 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		nearby,
 		receiver,
 		sender,
+		func() bool { return true },
 	)
 	if err != nil {
 		t.Fatalf("newHandler() error = %v", err)
@@ -113,6 +114,13 @@ func TestHandlerServesHealthAndWebUI(t *testing.T) {
 		if !strings.Contains(string(body), test.want) {
 			t.Errorf("%s body = %q, want substring %q", test.path, body, test.want)
 		}
+	}
+
+	scanRequest := httptest.NewRequest(http.MethodPost, "/api/v1/discovery/scan", nil)
+	scanResponse := httptest.NewRecorder()
+	handler.ServeHTTP(scanResponse, scanRequest)
+	if scanResponse.Code != http.StatusAccepted || !strings.Contains(scanResponse.Body.String(), `"started":true`) {
+		t.Fatalf("discovery scan response = %d %q", scanResponse.Code, scanResponse.Body.String())
 	}
 }
 

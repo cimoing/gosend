@@ -79,7 +79,15 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, err
 		RegisterRoutes: receiver.RegisterRoutes,
 	}, nearby, logger)
 	sender := transfer.NewSender(cfg.SendDirectory, database, nearby, discoveryService.SelfInfo(false))
-	handler, err := newHandler(cfg, database, localIdentity, nearby, receiver, sender)
+	handler, err := newHandler(
+		cfg,
+		database,
+		localIdentity,
+		nearby,
+		receiver,
+		sender,
+		discoveryService.TriggerScan,
+	)
 	if err != nil {
 		_ = database.Close()
 		return nil, err
@@ -181,6 +189,7 @@ func newHandler(
 	nearby *device.Registry,
 	receiver *transfer.Receiver,
 	sender *transfer.Sender,
+	triggerDiscovery func() bool,
 ) (http.Handler, error) {
 	staticFiles, err := fs.Sub(gosendweb.Static, "static")
 	if err != nil {
@@ -210,6 +219,7 @@ func newHandler(
 			"specificationVersion": localsend.SpecificationVersion,
 			"fingerprint":          localIdentity.Fingerprint,
 			"database":             cfg.DatabaseDriver,
+			"receivePolicy":        cfg.ReceivePolicy,
 			"build":                buildinfo.Current(),
 			"ready":                databaseReady(request.Context(), database),
 			"nearbyDevices":        len(nearby.List()),
@@ -218,6 +228,21 @@ func newHandler(
 	mux.HandleFunc("GET /api/v1/devices", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{"devices": nearby.List()})
+	})
+	mux.HandleFunc("POST /api/v1/discovery/scan", func(response http.ResponseWriter, _ *http.Request) {
+		if triggerDiscovery == nil {
+			http.Error(response, "discovery scan unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !triggerDiscovery() {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(response).Encode(map[string]any{"started": false, "running": true})
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(response).Encode(map[string]any{"started": true, "running": true})
 	})
 	mux.HandleFunc("GET /api/v1/receive-requests", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
