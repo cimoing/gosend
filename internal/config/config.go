@@ -25,6 +25,7 @@ type Config struct {
 	DatabaseDriver   string
 	DatabaseDSN      string
 	ReceivePolicy    string
+	WebAuthToken     string
 }
 
 type LookupEnv func(string) (string, bool)
@@ -46,6 +47,7 @@ func Parse(args []string, lookupEnv LookupEnv) (Config, error) {
 	flags.StringVar(&cfg.DatabaseDriver, "database-driver", defaults.DatabaseDriver, "database driver: memory, sqlite, mysql, or postgres")
 	flags.StringVar(&cfg.DatabaseDSN, "database-dsn", defaults.DatabaseDSN, "database connection string; defaults to <data-dir>/gosend.db for SQLite")
 	flags.StringVar(&cfg.ReceivePolicy, "receive-policy", defaults.ReceivePolicy, "incoming transfer policy: manual, trusted, or auto")
+	flags.StringVar(&cfg.WebAuthToken, "web-auth-token", defaults.WebAuthToken, "optional Web console Basic Auth password")
 
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
@@ -87,6 +89,7 @@ func defaultsFromEnvironment(lookupEnv LookupEnv) (Config, error) {
 		DatabaseDriver:   envOr(lookupEnv, "GOSEND_DATABASE_DRIVER", "sqlite"),
 		DatabaseDSN:      envOr(lookupEnv, "GOSEND_DATABASE_DSN", ""),
 		ReceivePolicy:    envOr(lookupEnv, "GOSEND_RECEIVE_POLICY", "manual"),
+		WebAuthToken:     envOr(lookupEnv, "GOSEND_WEB_AUTH_TOKEN", ""),
 	}, nil
 }
 

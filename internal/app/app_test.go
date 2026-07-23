@@ -134,6 +134,26 @@ func TestListSendFiles(t *testing.T) {
 	}
 }
 
+func TestSecureHandlerAuthenticationAndOrigin(t *testing.T) {
+	handler := secureHandler(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	}), "secret")
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/status", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+	request := httptest.NewRequest(http.MethodPost, "http://gosend.local/api/v1/send", nil)
+	request.SetBasicAuth("gosend", "secret")
+	request.Header.Set("Origin", "http://evil.local")
+	forbidden := httptest.NewRecorder()
+	handler.ServeHTTP(forbidden, request)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin status = %d", forbidden.Code)
+	}
+}
+
 func identityToInfo(fingerprint string) localsend.DeviceInfo {
 	return localsend.DeviceInfo{
 		Alias:       "Test GoSend",

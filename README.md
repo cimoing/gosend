@@ -41,12 +41,15 @@ data/
 | `--database-driver` | `GOSEND_DATABASE_DRIVER` | `sqlite` |
 | `--database-dsn` | `GOSEND_DATABASE_DSN` | `<data-dir>/gosend.db` |
 | `--receive-policy` | `GOSEND_RECEIVE_POLICY` | `manual` |
+| `--web-auth-token` | `GOSEND_WEB_AUTH_TOKEN` | 空，即不启用认证 |
 
 例如：
 
 ```powershell
 go run ./cmd/gosend --alias "Home NAS" --send-dir D:\Share\outbox --receive-dir D:\Share\inbox
 ```
+
+管理面需要跨越不可信局域网时应设置 `GOSEND_WEB_AUTH_TOKEN`。用户名固定为 `gosend`，浏览器会显示标准认证对话框。`/healthz` 和 `/readyz` 保持免认证以供容器探针使用。
 
 支持的数据库：
 

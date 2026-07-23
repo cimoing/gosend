@@ -79,3 +79,10 @@ go test ./internal/store -run TestStoreContract -count=1
 ```
 
 测试会运行迁移并写入带唯一后缀的设置与传输记录，禁止指向生产数据库。
+
+## 备份
+
+- SQLite：停止 GoSend 后同时备份数据库文件与 `identity.pem`；运行中备份应使用 SQLite Online Backup 工具而不是直接复制 WAL 文件。
+- MySQL/PostgreSQL：使用数据库原生一致性备份工具，并另外备份 `data-dir/identity.pem`。
+- `identity.pem` 决定设备指纹；丢失后其他设备会把 GoSend 识别为新设备。
+- 发送/接收文件目录不在数据库备份范围内，需要按存储系统策略单独保护。

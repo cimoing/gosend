@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,7 +377,42 @@ func newHandler(
 		}
 		response.WriteHeader(http.StatusNoContent)
 	})
-	return mux, nil
+	return secureHandler(mux, cfg.WebAuthToken), nil
+}
+
+func secureHandler(next http.Handler, token string) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		response.Header().Set("Referrer-Policy", "no-referrer")
+		response.Header().Set("X-Content-Type-Options", "nosniff")
+		response.Header().Set("X-Frame-Options", "DENY")
+		if token != "" && request.URL.Path != "/healthz" && request.URL.Path != "/readyz" {
+			username, password, ok := request.BasicAuth()
+			validUser := subtle.ConstantTimeCompare([]byte(username), []byte("gosend")) == 1
+			validPassword := len(password) == len(token) &&
+				subtle.ConstantTimeCompare([]byte(password), []byte(token)) == 1
+			if !ok || !validUser || !validPassword {
+				response.Header().Set("WWW-Authenticate", `Basic realm="GoSend", charset="UTF-8"`)
+				http.Error(response, "authentication required", http.StatusUnauthorized)
+				return
+			}
+		}
+		if request.Method != http.MethodGet && request.Method != http.MethodHead && request.Method != http.MethodOptions {
+			if origin := request.Header.Get("Origin"); origin != "" && !sameOrigin(origin, request.Host) {
+				http.Error(response, "cross-origin request rejected", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(response, request)
+	})
+}
+
+func sameOrigin(origin, host string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, host) && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 type sendFile struct {
