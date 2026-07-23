@@ -1,0 +1,22 @@
+# Build output
+/bin/
+/dist/
+/gosend
+/gosend.exe
+
+# Runtime data
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Local configuration and secrets
+.env
+*.pem
+*.key
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
